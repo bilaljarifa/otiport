@@ -14,6 +14,12 @@ from backend.forecaster import (
     compute_covariance_matrix,
     fetch_etf_data
 )
+from backend.news_service import fetch_news_for_ticker, NewsServiceError
+from backend.news_pipeline import analyze_article, analyze_articles
+from backend.news_aggregator import aggregate as aggregate_news
+from backend.news_features import build_news_features
+from backend.forecast_context import build_forecast_context
+from backend.news_cache import analyzed_news_cache
 
 app = FastAPI(
     title="Dynamic Portfolio Optimizer",
@@ -591,6 +597,273 @@ def efficient_frontier(req: EfficientFrontierRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Efficient frontier error: {str(e)}")
+
+
+# ============== News, Sentiment & Market Impact ==============
+#
+# Frontend (Streamlit) -> this API -> backend/news_service.py -> NewsAPI.
+# NEWS_API_KEY lives only in backend/config.py; it is never placed in any
+# response model below.
+
+class SentimentModel(BaseModel):
+    label: Literal["POSITIVE", "NEGATIVE", "NEUTRAL"]
+    score: float = Field(..., ge=0, le=1)
+
+
+class MarketImpactModel(BaseModel):
+    direction: Literal["POSITIVE", "NEGATIVE", "NEUTRAL"]
+    level: Literal["LOW", "MEDIUM", "HIGH"]
+    confidence: float = Field(..., ge=0, le=1)
+
+
+class NewsAnalyzeRequest(BaseModel):
+    ticker: str
+    headline: str = Field(..., min_length=1)
+    description: Optional[str] = None
+    content: Optional[str] = None
+
+
+class NewsAnalyzeResponse(BaseModel):
+    ticker: str
+    sentiment: SentimentModel
+    marketImpact: MarketImpactModel
+
+
+@app.post("/news/analyze", response_model=NewsAnalyzeResponse)
+def analyze_news(req: NewsAnalyzeRequest):
+    """Sentiment + market impact for a single, user-supplied headline/article."""
+    article = {
+        "title": req.headline,
+        "description": req.description or "",
+        "content": req.content or "",
+        "source": "manual",
+        "url": None,
+        "publishedAt": None,
+    }
+    analyzed = analyze_article(article)
+    if analyzed is None:
+        raise HTTPException(status_code=400, detail="Headline/content is too short to analyze.")
+
+    return NewsAnalyzeResponse(
+        ticker=req.ticker.upper(),
+        sentiment=SentimentModel(**analyzed["sentiment"]),
+        marketImpact=MarketImpactModel(**analyzed["market_impact"]),
+    )
+
+
+_NEWS_ERROR_STATUS = {
+    "no_api_key": (503, "News service is not configured on the server."),
+    "invalid_key": (503, "News service authentication failed."),
+    "rate_limit": (429, "News service rate limit reached — try again shortly."),
+    "timeout": (504, "News service timed out."),
+    "unavailable": (503, "News service is temporarily unavailable."),
+}
+
+
+def _news_error_to_http(exc: NewsServiceError) -> HTTPException:
+    status_code, message = _NEWS_ERROR_STATUS.get(exc.kind, (503, "News service error."))
+    return HTTPException(status_code=status_code, detail=message)
+
+
+def _get_analyzed_news(ticker: str) -> list:
+    """Fetch + preprocess + score recent news for a ticker, cached ~20 min."""
+    ticker = ticker.upper()
+
+    def _load():
+        company_name = ETF_METADATA.get(ticker, {}).get("name")
+        query_name = f"{company_name} ETF" if company_name else None
+        try:
+            raw_articles = fetch_news_for_ticker(ticker, company_name=query_name)
+        except NewsServiceError as exc:
+            raise _news_error_to_http(exc)
+        analyzed = analyze_articles(raw_articles)
+        analyzed.sort(key=lambda a: a.get("publishedAt") or "", reverse=True)
+        return analyzed
+
+    cached = analyzed_news_cache.get(ticker)
+    if cached is not None:
+        return cached
+    result = _load()
+    analyzed_news_cache.set(ticker, result)
+    return result
+
+
+class NewsItemModel(BaseModel):
+    title: str
+    description: str
+    source: str
+    url: Optional[str]
+    publishedAt: Optional[str]
+    sentiment: SentimentModel
+    marketImpact: MarketImpactModel
+    recencyWeight: float
+
+
+class NewsListResponse(BaseModel):
+    ticker: str
+    items: List[NewsItemModel]
+    count: int
+
+
+@app.get("/news/{ticker}", response_model=NewsListResponse)
+def get_ticker_news(ticker: str):
+    """Recent news for `ticker`, each scored with sentiment + market impact."""
+    analyzed = _get_analyzed_news(ticker)
+    items = [
+        NewsItemModel(
+            title=a["title"], description=a["description"], source=a["source"],
+            url=a["url"], publishedAt=a["publishedAt"],
+            sentiment=SentimentModel(**a["sentiment"]),
+            marketImpact=MarketImpactModel(**a["market_impact"]),
+            recencyWeight=a["recency_weight"],
+        )
+        for a in analyzed
+    ]
+    return NewsListResponse(ticker=ticker.upper(), items=items, count=len(items))
+
+
+class NewsSummaryResponse(BaseModel):
+    ticker: str
+    news_count: int
+    positive_news_count: int
+    negative_news_count: int
+    neutral_news_count: int
+    weighted_sentiment: float
+    overall_sentiment: str
+    overall_market_impact: str
+    overall_confidence: float
+    average_confidence: float
+
+
+@app.get("/news/{ticker}/summary", response_model=NewsSummaryResponse)
+def get_ticker_news_summary(ticker: str):
+    """Aggregated sentiment/impact across today's news for `ticker`."""
+    analyzed = _get_analyzed_news(ticker)
+    summary = aggregate_news(analyzed)
+    return NewsSummaryResponse(ticker=ticker.upper(), **summary)
+
+
+class MarketImpactRequest(BaseModel):
+    tickers: List[str] = Field(..., min_length=1)
+
+
+class TickerImpactModel(BaseModel):
+    ticker: str
+    news_count: int
+    weighted_sentiment: float
+    overall_sentiment: str
+    overall_market_impact: str
+    overall_confidence: float
+
+
+class MarketImpactResponse(BaseModel):
+    tickers: List[TickerImpactModel]
+    overall: NewsSummaryResponse
+    failed_tickers: List[str]
+
+
+@app.post("/news/market-impact", response_model=MarketImpactResponse)
+def get_market_impact(req: MarketImpactRequest):
+    """News-driven sentiment/impact across a whole universe of tickers.
+
+    Per-ticker failures (rate limit, no news…) are skipped rather than
+    failing the whole request — `failed_tickers` reports which ones, so the
+    view can still render a partial market read. `overall` pools every
+    analyzed article across all tickers through the same weighting as a
+    single-ticker summary, giving one market-wide reading rather than an
+    average of averages.
+    """
+    tickers = [t.upper() for t in dict.fromkeys(req.tickers)]
+    per_ticker: list[TickerImpactModel] = []
+    all_articles: list = []
+    failed: list[str] = []
+
+    for ticker in tickers:
+        try:
+            analyzed = _get_analyzed_news(ticker)
+        except HTTPException:
+            failed.append(ticker)
+            continue
+        summary = aggregate_news(analyzed)
+        per_ticker.append(TickerImpactModel(ticker=ticker, **{
+            k: summary[k] for k in (
+                "news_count", "weighted_sentiment", "overall_sentiment",
+                "overall_market_impact", "overall_confidence",
+            )
+        }))
+        all_articles.extend(analyzed)
+
+    overall = aggregate_news(all_articles)
+    return MarketImpactResponse(
+        tickers=per_ticker,
+        overall=NewsSummaryResponse(ticker="MARKET", **overall),
+        failed_tickers=failed,
+    )
+
+
+class ForecastContextRequest(BaseModel):
+    ticker: str
+    model_path: Optional[str] = Field(
+        default="trained_models_LSTM_2000_epochs/trained_models_LSTM_2000_epochs",
+    )
+    current_price: Optional[float] = Field(
+        default=None, description="Pass the UI's already-known quote to avoid a second fetch."
+    )
+
+
+class BaseForecastModel(BaseModel):
+    predicted_return_22d: Optional[float]
+    used_return_22d: float
+    forecast_price: Optional[float]
+    model_loaded: bool
+    note: Optional[str]
+    prediction_date: Optional[str]
+
+
+class NewsContextForecastModel(BaseModel):
+    predicted_return_22d: float
+    forecast_price: Optional[float]
+    adjustment_22d: float
+    combined_news_signal: float
+    max_adjustment_22d: float
+
+
+class ForecastContextResponse(BaseModel):
+    ticker: str
+    current_price: Optional[float]
+    base_forecast: BaseForecastModel
+    news_context_forecast: NewsContextForecastModel
+    potential_direction: str
+    news_features: Dict[str, float | int]
+    disclaimer: str
+
+
+@app.post("/forecast/context", response_model=ForecastContextResponse)
+def forecast_context(req: ForecastContextRequest):
+    """Base LSTM forecast (unchanged) vs. news-context forecast, side by side.
+
+    A news-service failure degrades to "no news features" (all zeros) rather
+    than blocking the base forecast — the comparison still renders, just
+    without a news tilt.
+    """
+    ticker = req.ticker.upper()
+    try:
+        analyzed = _get_analyzed_news(ticker)
+    except HTTPException:
+        analyzed = []
+
+    features = build_news_features(analyzed)
+
+    try:
+        context = build_forecast_context(
+            ticker, features, model_path=req.model_path, current_price=req.current_price,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Forecast context error: {str(e)}")
+
+    return ForecastContextResponse(**context)
 
 
 # ============== Health Check ==============

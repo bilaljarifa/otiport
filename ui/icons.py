@@ -46,6 +46,8 @@ ICONS: Final[dict[str, str]] = {
     "volatility": "waves",
     "benchmark": "flag",
     "forecast": "auto_awesome",
+    "sentiment": "psychology",
+    "impact": "bolt",
     "target": "target",
     "drawdown": "south_east",
     # UI

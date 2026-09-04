@@ -99,6 +99,7 @@ app.py                  Point d'entrée : configuration, contexte partagé, navi
 | | Orders | Carnet d'ordres, annulation des ordres en attente, historique filtrable |
 | | Transactions | Journal des mouvements, flux par instrument, export CSV |
 | Intelligence | News | Actualités Yahoo Finance des instruments suivis |
+| | News Analysis | Sentiment financier (FinBERT), impact de marché, agrégation du jour, comparaison Base Forecast / News-Context Forecast |
 | | Analytics | Frontière efficiente, corrélations, risque/performance, prévisions vs réalisé |
 | | Alerts | Seuils de prix, alertes déclenchées, surveillance des signaux |
 | Compte | Settings | Apparence, backend, valeurs par défaut, maintenance |
@@ -137,6 +138,79 @@ sur les pages Trading et Analytics. Le chemin est configurable dans Settings.
 
 ---
 
+## News, Sentiment & Market Impact
+
+Pipeline complet, exécuté entièrement côté backend FastAPI :
+
+```
+NewsAPI (backend/news_service.py)
+        ↓
+Preprocessing (backend/news_preprocessing.py)
+   HTML/entités retirés, texte tronqué nettoyé, doublons supprimés,
+   articles trop courts écartés
+        ↓
+Sentiment (backend/sentiment.py)
+   FinBERT (ProsusAI/finbert, poids TensorFlow) si `transformers` est
+   installé et le modèle téléchargeable, sinon repli automatique sur un
+   score lexical financier — jamais de crash, jamais de rechargement
+   par requête (singleton process-wide)
+        ↓
+Market Impact (backend/market_impact.py)
+   direction (POSITIVE/NEGATIVE/NEUTRAL) + niveau (LOW/MEDIUM/HIGH) +
+   confiance, à partir du sentiment ET d'un score de matérialité déduit
+   du type de nouvelle (résultats, M&A, régulation… vs mention générique)
+        ↓
+Recency weighting (backend/news_recency.py)
+   décroissance exponentielle, demi-vie 6h
+        ↓
+Aggregation (backend/news_aggregator.py)
+   sentiment pondéré, compteurs positif/négatif/neutre, impact global
+        ↓
+News Features (backend/news_features.py)
+        ↓
+Forecast Context (backend/forecast_context.py)
+   Base Forecast = backend/forecaster.py (LSTM existant, inchangé)
+   News-Context Forecast = Base Forecast + ajustement borné (±2 pt sur
+   le rendement 22j), proportionnel à sentiment × impact × confiance
+```
+
+### Configuration
+
+Créez `.env` dans `Optiport/` (déjà dans `.gitignore`) :
+
+```env
+NEWS_API_KEY=votre_clé_newsapi
+```
+
+`NEWS_API_KEY` n'est lu que par `backend/config.py` et `backend/news_service.py` :
+il ne transite jamais vers l'interface Streamlit, n'apparaît dans aucune
+réponse d'API ni aucun log.
+
+### Endpoints
+
+| Méthode | Route | Rôle |
+| --- | --- | --- |
+| POST | `/news/analyze` | Sentiment + impact pour un titre/contenu saisi manuellement |
+| GET | `/news/{ticker}` | Actualités récentes du ticker, notées individuellement |
+| GET | `/news/{ticker}/summary` | Agrégation du jour (compteurs, sentiment pondéré, impact global) |
+| POST | `/forecast/context` | Base Forecast vs. News-Context Forecast |
+
+### Limites
+
+- Pas de base de données : les actualités analysées sont mises en cache en
+  mémoire process (~20 min, `backend/news_cache.py`), pas persistées entre
+  redémarrages du backend.
+- FinBERT télécharge ses poids depuis Hugging Face au premier appel ; sans
+  réseau ou sans `transformers` installé, le repli lexical s'applique
+  automatiquement (moins précis, mais toujours disponible).
+- L'ajustement du forecast est une couche heuristique au-dessus du LSTM
+  existant, pas un réentraînement : le modèle n'a jamais vu de feature news.
+- **Le sentiment et l'impact de marché sont des estimations probabilistes.
+  Ils ne garantissent en rien les mouvements futurs du marché** — l'interface
+  le rappelle explicitement partout où ces scores sont affichés.
+
+---
+
 ## Design system
 
 - Palette sombre, deux variantes (Bleu nuit / Graphite), typographie Inter.
@@ -152,5 +226,21 @@ sur les pages Trading et Analytics. Le chemin est configurable dans Settings.
 
 ## Dépendances
 
-Aucune dépendance nouvelle. `requirements.txt` est inchangé — Plotly, déjà
-présent, est désormais la seule bibliothèque de graphiques utilisée.
+Le cœur applicatif (Streamlit, FastAPI, TensorFlow/LSTM, Plotly) est
+inchangé. Trois dépendances ajoutées pour le module News/Sentiment :
+
+- `python-dotenv` — chargement de `.env`
+- `transformers` — FinBERT (poids TensorFlow, pas de `torch`)
+- `pytest` — suite de tests (`backend/`)
+
+## Tests
+
+```bash
+pytest tests/
+```
+
+42 tests couvrent le preprocessing, le sentiment (repli lexical, sans
+dépendre du téléchargement de FinBERT), le market impact, la pondération de
+récence, l'agrégation, le client NewsAPI (entièrement mocké) et la couche de
+contexte de forecast (vérifie notamment que le forecast existant reste
+inchangé et qu'une actualité neutre ne déplace pas la prévision).

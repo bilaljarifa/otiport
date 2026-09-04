@@ -171,3 +171,60 @@ def efficient_frontier(tickers: tuple[str, ...], *, risk_free_rate: float = 0.05
         },
         timeout=timeout,
     )
+
+
+# ---------------------------------------------------------------------------
+#  News, sentiment & market impact
+#
+#  NEWS_API_KEY never reaches this module or the browser: every call below
+#  goes through the FastAPI backend, which is the only thing that talks to
+#  NewsAPI (see backend/news_service.py).
+# ---------------------------------------------------------------------------
+
+def analyze_news(ticker: str, headline: str, *, description: str = "",
+                 content: str = "", timeout: int = 20) -> dict[str, Any]:
+    """Sentiment + market impact for a manually entered headline/article
+    (`POST /news/analyze`). Not cached: each submission is a fresh request."""
+    return _request(
+        "POST", "/news/analyze",
+        json={
+            "ticker": ticker, "headline": headline,
+            "description": description, "content": content,
+        },
+        timeout=timeout,
+    )
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def ticker_news(ticker: str, timeout: int = 30) -> dict[str, Any]:
+    """Recent, scored news for a ticker (`GET /news/{ticker}`)."""
+    return _request("GET", f"/news/{ticker}", timeout=timeout)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def ticker_news_summary(ticker: str, timeout: int = 30) -> dict[str, Any]:
+    """Aggregated sentiment/impact for today's news (`GET /news/{ticker}/summary`)."""
+    return _request("GET", f"/news/{ticker}/summary", timeout=timeout)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def market_news_impact(tickers: tuple[str, ...], timeout: int = 120) -> dict[str, Any]:
+    """News-driven sentiment/impact across a universe of tickers
+    (`POST /news/market-impact`). One request instead of one per ticker."""
+    return _request(
+        "POST", "/news/market-impact",
+        json={"tickers": list(tickers)},
+        timeout=timeout,
+    )
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def forecast_context(ticker: str, *, current_price: float | None = None,
+                     model_path: str = DEFAULT_MODEL_PATH,
+                     timeout: int = 180) -> dict[str, Any]:
+    """Base forecast vs. news-context forecast (`POST /forecast/context`)."""
+    return _request(
+        "POST", "/forecast/context",
+        json={"ticker": ticker, "model_path": model_path, "current_price": current_price},
+        timeout=timeout,
+    )

@@ -188,9 +188,6 @@ with detail_columns[1]:
 
     with c.card(key="quicklinks"):
         c.section("Actions", icon="bolt")
-        if st.button("Analyser dans le laboratoire", width="stretch",
-                     icon=st_icon("analytics"), key="markets_to_analytics"):
-            layout.goto("analytics")
         if st.button("Voir les actualités", width="stretch",
                      icon=st_icon("news"), key="markets_to_news"):
             layout.goto("news")

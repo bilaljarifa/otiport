@@ -658,3 +658,78 @@ def scatter_risk_return(
     fig.update_yaxes(title=dict(text="Rendement attendu (%)",
                                 font=dict(size=11, color=_P["text_faint"])))
     return fig
+
+
+# ---------------------------------------------------------------------------
+#  Forecast + news context
+# ---------------------------------------------------------------------------
+
+def forecast_with_news(
+    dates: Sequence[Any],
+    prices: Sequence[float],
+    *,
+    base_forecast: tuple[Any, float] | None = None,
+    news_context_forecast: tuple[Any, float] | None = None,
+    news_markers: Sequence[Mapping[str, Any]] | None = None,
+    height: int = 320,
+) -> go.Figure:
+    """Historical price with the base and news-context forecast points, plus
+    dated news markers (📰) coloured by sentiment.
+
+    `news_markers`: sequence of `{"date", "price", "sentiment"}` — `sentiment`
+    one of `POSITIVE`/`NEGATIVE`/`NEUTRAL`, `price` the historical close on
+    (or nearest to) that date, used only to place the marker on the line.
+    """
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=list(dates), y=list(prices), name="Historique", mode="lines",
+            line=dict(color=series_color(0), width=2),
+            hovertemplate="%{x|%d %b %Y}<br>%{y:,.2f} $<extra></extra>",
+        )
+    )
+
+    last_x = dates[-1] if len(dates) else None
+    last_y = prices[-1] if len(prices) else None
+
+    if base_forecast and last_x is not None:
+        bx, by = base_forecast
+        fig.add_trace(
+            go.Scatter(
+                x=[last_x, bx], y=[last_y, by], name="Base Forecast",
+                mode="lines+markers", line=dict(color=_P["violet"], width=2, dash="dash"),
+                marker=dict(size=[0, 9], symbol="circle"),
+                hovertemplate="Base Forecast<br>%{y:,.2f} $<extra></extra>",
+            )
+        )
+
+    if news_context_forecast and last_x is not None:
+        nx, ny = news_context_forecast
+        fig.add_trace(
+            go.Scatter(
+                x=[last_x, nx], y=[last_y, ny], name="News-Context Forecast",
+                mode="lines+markers", line=dict(color=_P["accent"], width=2, dash="dot"),
+                marker=dict(size=[0, 10], symbol="star"),
+                hovertemplate="News-Context Forecast<br>%{y:,.2f} $<extra></extra>",
+            )
+        )
+
+    if news_markers:
+        colors = {"POSITIVE": _P["up"], "NEGATIVE": _P["down"]}
+        fig.add_trace(
+            go.Scatter(
+                x=[m["date"] for m in news_markers],
+                y=[m["price"] for m in news_markers],
+                name="Actualités",
+                mode="markers",
+                marker=dict(
+                    size=11, symbol="diamond",
+                    color=[colors.get(m["sentiment"], _P["text_muted"]) for m in news_markers],
+                    line=dict(width=1.5, color=_P["bg"]),
+                ),
+                hovertext=[f"📰 {m.get('title', m['sentiment'].title())}" for m in news_markers],
+                hovertemplate="%{hovertext}<extra></extra>",
+            )
+        )
+
+    return _base(fig, height=height, legend=True, hovermode="closest")

@@ -339,6 +339,35 @@ def gauge_html(value: float, *, low: float = 0.0, high: float = 100.0,
     )
 
 
+def heatmap_button_css(tiles: Sequence[dict[str, Any]], *, scale: float = 0.5) -> str:
+    """CSS that recolours a grid of `st.button` widgets into heatmap tiles.
+
+    Pair each tile with `st.button(..., key=tile["key"])` using that exact
+    key — Streamlit exposes it as a `st-key-<key>` class on the button's
+    wrapper, which is what these rules target. This keeps the heatmap a real,
+    clickable widget (selecting an instrument to inspect) instead of inert
+    HTML, while still reading as a Finviz-style green/red grid.
+
+    Each tile: `{"key", "value" (signed float, e.g. -1..1), "selected"
+    (optional bool, adds a highlight ring)}`.
+    """
+    rules = []
+    for t in tiles:
+        value = float(t.get("value") or 0.0)
+        magnitude = min(abs(value) / scale, 1.0) if scale else 0.0
+        color = "var(--opt-up)" if value >= 0 else "var(--opt-down)"
+        fill_mix = 12 + magnitude * 55
+        border_mix = min(fill_mix + 20, 75)
+        ring = "box-shadow:0 0 0 2px var(--opt-accent) !important;" if t.get("selected") else ""
+        rules.append(
+            f'.st-key-{t["key"]} button {{'
+            f'background:color-mix(in srgb,{color} {fill_mix:.0f}%,var(--opt-surface-low)) !important;'
+            f'border-color:color-mix(in srgb,{color} {border_mix:.0f}%,var(--opt-border-soft)) !important;'
+            f"{ring}}}"
+        )
+    return f"<style>{''.join(rules)}</style>"
+
+
 def legend_html(items: Iterable[tuple[str, str]]) -> str:
     """Colour legend: iterable of `(label, color)`."""
     body = "".join(

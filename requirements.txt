@@ -12,3 +12,6 @@ tf_keras
 scipy
 plotly
 altair
+python-dotenv
+transformers
+pytest

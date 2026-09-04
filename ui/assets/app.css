@@ -1013,6 +1013,25 @@ a.opt-feed__title:hover { color: var(--opt-accent-hi); }
 .opt-tile__v { font-size: var(--opt-fs-lg); font-weight: 700; color: var(--opt-text); font-variant-numeric: tabular-nums; margin-top: 0.1875rem; letter-spacing: -0.02em; }
 .opt-tile__s { font-size: var(--opt-fs-xs); color: var(--opt-text-muted); margin-top: 0.125rem; }
 
+/* --- Sentiment heatmap (clickable st.button tiles) ---------------------- */
+[class*="st-key-na_heat_"] button {
+  font-family: var(--opt-font-mono);
+  font-weight: 800;
+  font-size: var(--opt-fs-base);
+  letter-spacing: 0.01em;
+  color: var(--opt-text);
+  min-height: 4.25rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--opt-r-md);
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  text-align: left;
+  transition: transform var(--opt-t-base), border-color var(--opt-t-base);
+}
+[class*="st-key-na_heat_"] button p { white-space: pre-line; line-height: 1.4; margin: 0; }
+[class*="st-key-na_heat_"] button:hover { transform: translateY(-2px); }
+
 /* --- Avatar ----------------------------------------------------------- */
 .opt-avatar {
   width: 2rem;

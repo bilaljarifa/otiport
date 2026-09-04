@@ -83,8 +83,8 @@ def navigation() -> tuple[Any, dict[str, Any]]:
                                 icon=st_icon("transactions"), url_path="transactions"),
         "news": st.Page("views/news.py", title="News",
                         icon=st_icon("news"), url_path="news"),
-        "analytics": st.Page("views/analytics.py", title="Analytics",
-                             icon=st_icon("analytics"), url_path="analytics"),
+        "news_analysis": st.Page("views/news_analysis.py", title="News Analysis",
+                                 icon=st_icon("sentiment"), url_path="news-analysis"),
         "alerts": st.Page("views/alerts.py", title="Alerts",
                           icon=st_icon("alerts"), url_path="alerts"),
         "settings": st.Page("views/settings.py", title="Settings",
@@ -99,11 +99,11 @@ def navigation() -> tuple[Any, dict[str, Any]]:
         "Pilotage": [pages["dashboard"], pages["markets"], pages["portfolio"],
                      pages["watchlist"]],
         "Exécution": [pages["trading"], pages["orders"], pages["transactions"]],
-        "Intelligence": [pages["news"], pages["analytics"], pages["alerts"]],
+        "Intelligence": [pages["news"], pages["news_analysis"], pages["alerts"]],
         "Compte": [pages["settings"], pages["profile"], pages["logout"]],
     }
     # `expanded=True` keeps every section open: the sidebar is the primary
-    # navigation surface and all thirteen destinations must stay one click away.
+    # navigation surface and all twelve destinations must stay one click away.
     return st.navigation(sections, expanded=True), pages
 
 
