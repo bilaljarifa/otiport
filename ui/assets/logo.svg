@@ -1,24 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 188 40" width="188" height="40" role="img" aria-label="Optiport">
-  <defs>
-    <linearGradient id="optMark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#60A5FA"/>
-      <stop offset="55%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#2563EB"/>
-    </linearGradient>
-    <linearGradient id="optSpark" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0%" stop-color="#22C55E"/>
-      <stop offset="100%" stop-color="#A7F3D0"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 172 32" width="172" height="32" role="img" aria-label="Optiport">
+  <!-- Same geometric mark as logo-mark.svg (three ascending bars inside a
+       square frame) paired with a plain, bold, letter-spaced wordmark —
+       monochrome, no gradients, no stock-arrow cliché. -->
+  <rect x="1" y="1" width="26" height="26" rx="5" fill="none" stroke="#fff" stroke-width="2"/>
+  <rect x="7"    y="16" width="3.2" height="7"  fill="#fff"/>
+  <rect x="12.1" y="11" width="3.2" height="12" fill="#fff"/>
+  <rect x="17.2" y="6"  width="3.2" height="17" fill="#fff"/>
 
-  <rect x="2" y="6" width="28" height="28" rx="8" fill="url(#optMark)"/>
-  <rect x="2" y="6" width="28" height="28" rx="8" fill="none" stroke="rgba(255,255,255,0.22)"/>
-  <path d="M8.5 25.5 L13.5 19.5 L18 22.5 L24 12.5" fill="none" stroke="#fff"
-        stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="24" cy="12.5" r="2.6" fill="#fff"/>
-
-  <text x="39" y="25.5" font-family="Inter, 'Segoe UI', Roboto, sans-serif"
-        font-size="17" font-weight="700" letter-spacing="-0.5" fill="#F8FAFC">Optiport</text>
-  <path d="M138 22 L143 16 L147.5 19 L153 11.5" fill="none" stroke="url(#optSpark)"
-        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+  <text x="36" y="21" font-family="Inter, 'Segoe UI', Roboto, sans-serif"
+        font-size="17" font-weight="800" letter-spacing="0.5" fill="#fff">OPTIPORT</text>
 </svg>

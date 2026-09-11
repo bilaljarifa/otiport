@@ -1,11 +1,19 @@
+from contextlib import asynccontextmanager
 from typing import List, Dict, Optional, Literal
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend.config import APP_VERSION, cors_allowed_origins
+from backend.etf_metadata import ETF_METADATA
+from backend.db import init_db
+from backend.deps import get_current_user
+from backend.market_cache import cache_key, chart_data_cache
+from backend import pricing
 from backend.optimizer import optimize_portfolio, compute_efficient_frontier
 from backend.forecaster import (
     predict_returns,
@@ -20,8 +28,19 @@ from backend.news_aggregator import aggregate as aggregate_news
 from backend.news_features import build_news_features
 from backend.forecast_context import build_forecast_context
 from backend.news_cache import analyzed_news_cache
+from backend.routers import admin as admin_router
+from backend.routers import assistant as assistant_router
+from backend.routers import auth as auth_router
+from backend.routers import portfolio as portfolio_router
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    init_db()
+    yield
+
 
 app = FastAPI(
+    lifespan=_lifespan,
     title="Dynamic Portfolio Optimizer",
     description="""
     API for ETF portfolio optimization with ML-based return forecasting.
@@ -42,29 +61,57 @@ app = FastAPI(
     - `min_volatility`: Minimize portfolio risk
     - `risk_parity`: Equal risk contribution from each asset
     - `equal_weight`: Simple equal allocation
+
+    ## Authentication
+    Every endpoint below requires `Authorization: Bearer <token>` (obtained
+    from `POST /auth/login`) except `/auth/register`, `/auth/login` and
+    `/health`. `/admin/*` additionally requires an admin account.
     """,
-    version="2.1.0"
+    version=APP_VERSION
 )
 
-# ETF metadata
-ETF_METADATA = {
-    "PSI": {"name": "Semiconductors", "region": "North America"},
-    "IYW": {"name": "US Technology", "region": "North America"},
-    "RING": {"name": "Gold Miners", "region": "Developed Markets"},
-    "PICK": {"name": "Metals & Mining", "region": "Developed Markets"},
-    "NLR": {"name": "Nuclear Energy", "region": "Developed Markets"},
-    "UTES": {"name": "Utilities", "region": "North America"},
-    "LIT": {"name": "Lithium & Battery", "region": "Developed Markets"},
-    "NANR": {"name": "Natural Resources", "region": "North America"},
-    "GUNR": {"name": "Global Resources", "region": "Developed Markets"},
-    "XCEM": {"name": "Emerging Markets", "region": "Emerging Markets"},
-    "PTLC": {"name": "Large Cap", "region": "North America"},
-    "FXU": {"name": "Utilities Alpha", "region": "North America"},
-}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_allowed_origins(),
+    allow_credentials=False,  # auth is a Bearer token (localStorage), not cookies
+    allow_methods=["*"],
+    allow_headers=["*"],
+    # Without this, browsers cache a preflight OPTIONS response only very
+    # briefly (Chromium defaults to 5s), so a chatty SPA calling the same
+    # endpoint repeatedly (quotes, portfolio summary, ...) re-preflights on
+    # almost every call. 10 minutes is well within how often CORS policy
+    # here actually changes (never, at runtime) and cuts a real fraction of
+    # the extra round trips React makes to FastAPI.
+    max_age=600,
+)
+
+app.include_router(auth_router.router)
+app.include_router(admin_router.router)
+app.include_router(portfolio_router.router)
+app.include_router(assistant_router.router)
+
+_AUTH = [Depends(get_current_user)]
+
+# ETF metadata now lives in backend/etf_metadata.py (imported at the top of
+# this file) — shared with backend/assistant_tools.py.
 
 
 def get_historical_prices(tickers: List[str], period: str = "1y") -> Dict:
-    """Fetch historical prices for charting."""
+    """Fetch historical prices for charting. Cached for a short TTL — see
+    `backend/market_cache.py`; identical to `calculate_ytd_returns` and
+    `get_normalized_prices` below, this is requested with the same
+    (tickers, period) very often (a `/smart-invest` re-run, a second user
+    with the default universe)."""
+    key = cache_key("historical_prices", tickers, period)
+    cached = chart_data_cache.get(key)
+    if cached is not None:
+        return cached
+    result = _get_historical_prices_uncached(tickers, period)
+    chart_data_cache.set(key, result)
+    return result
+
+
+def _get_historical_prices_uncached(tickers: List[str], period: str = "1y") -> Dict:
     try:
         data = yf.download(tickers, period=period, progress=False)
         if data.empty:
@@ -93,9 +140,20 @@ def get_historical_prices(tickers: List[str], period: str = "1y") -> Dict:
 
 
 def calculate_ytd_returns(tickers: List[str]) -> Dict[str, float]:
-    """Calculate YTD returns for each ticker."""
+    """Calculate YTD returns for each ticker. Cached for a short TTL — see
+    `get_historical_prices`."""
+    start_of_year = datetime(datetime.now().year, 1, 1).strftime('%Y-%m-%d')
+    key = cache_key("ytd_returns", tickers, start_of_year)
+    cached = chart_data_cache.get(key)
+    if cached is not None:
+        return cached
+    result = _calculate_ytd_returns_uncached(tickers, start_of_year)
+    chart_data_cache.set(key, result)
+    return result
+
+
+def _calculate_ytd_returns_uncached(tickers: List[str], start_of_year: str) -> Dict[str, float]:
     try:
-        start_of_year = datetime(datetime.now().year, 1, 1).strftime('%Y-%m-%d')
         data = yf.download(tickers, start=start_of_year, progress=False)
 
         if data.empty:
@@ -121,7 +179,18 @@ def calculate_ytd_returns(tickers: List[str]) -> Dict[str, float]:
 
 
 def get_normalized_prices(tickers: List[str], period: str = "6mo") -> Dict:
-    """Get normalized prices (starting at 100) for comparison."""
+    """Get normalized prices (starting at 100) for comparison. Cached for a
+    short TTL — see `get_historical_prices`."""
+    key = cache_key("normalized_prices", tickers, period)
+    cached = chart_data_cache.get(key)
+    if cached is not None:
+        return cached
+    result = _get_normalized_prices_uncached(tickers, period)
+    chart_data_cache.set(key, result)
+    return result
+
+
+def _get_normalized_prices_uncached(tickers: List[str], period: str = "6mo") -> Dict:
     try:
         data = yf.download(tickers, period=period, progress=False)
         if data.empty:
@@ -169,7 +238,7 @@ class OptimizeResponse(BaseModel):
     sharpe: float
 
 
-@app.post("/optimize", response_model=OptimizeResponse)
+@app.post("/optimize", response_model=OptimizeResponse, dependencies=_AUTH)
 def optimize(req: OptimizeRequest):
     """Basic portfolio optimization with provided returns and covariance."""
     n = len(req.tickers)
@@ -223,7 +292,7 @@ class ForecastResponse(BaseModel):
     model_loaded: bool
 
 
-@app.post("/forecast", response_model=ForecastResponse)
+@app.post("/forecast", response_model=ForecastResponse, dependencies=_AUTH)
 def forecast(req: ForecastRequest):
     """Generate 22-day return forecasts for given ETF tickers."""
     try:
@@ -338,7 +407,7 @@ class SmartInvestResponse(BaseModel):
     normalized_prices: Optional[ChartData] = None
 
 
-@app.post("/smart-invest", response_model=SmartInvestResponse)
+@app.post("/smart-invest", response_model=SmartInvestResponse, dependencies=_AUTH)
 def smart_invest(req: SmartInvestRequest):
     """
     Smart Investment Advisor - Forecast returns and optimize portfolio in one call.
@@ -523,7 +592,7 @@ class ChartDataResponse(BaseModel):
     ytd_returns: Dict[str, float]
 
 
-@app.post("/chart-data", response_model=ChartDataResponse)
+@app.post("/chart-data", response_model=ChartDataResponse, dependencies=_AUTH)
 def get_chart_data(req: ChartDataRequest):
     """Get price data for charting."""
     try:
@@ -569,7 +638,7 @@ class EfficientFrontierResponse(BaseModel):
     min_vol_volatility: float
 
 
-@app.post("/efficient-frontier", response_model=EfficientFrontierResponse)
+@app.post("/efficient-frontier", response_model=EfficientFrontierResponse, dependencies=_AUTH)
 def efficient_frontier(req: EfficientFrontierRequest):
     """Compute the efficient frontier for visualization."""
     try:
@@ -629,7 +698,7 @@ class NewsAnalyzeResponse(BaseModel):
     marketImpact: MarketImpactModel
 
 
-@app.post("/news/analyze", response_model=NewsAnalyzeResponse)
+@app.post("/news/analyze", response_model=NewsAnalyzeResponse, dependencies=_AUTH)
 def analyze_news(req: NewsAnalyzeRequest):
     """Sentiment + market impact for a single, user-supplied headline/article."""
     article = {
@@ -705,7 +774,7 @@ class NewsListResponse(BaseModel):
     count: int
 
 
-@app.get("/news/{ticker}", response_model=NewsListResponse)
+@app.get("/news/{ticker}", response_model=NewsListResponse, dependencies=_AUTH)
 def get_ticker_news(ticker: str):
     """Recent news for `ticker`, each scored with sentiment + market impact."""
     analyzed = _get_analyzed_news(ticker)
@@ -735,7 +804,7 @@ class NewsSummaryResponse(BaseModel):
     average_confidence: float
 
 
-@app.get("/news/{ticker}/summary", response_model=NewsSummaryResponse)
+@app.get("/news/{ticker}/summary", response_model=NewsSummaryResponse, dependencies=_AUTH)
 def get_ticker_news_summary(ticker: str):
     """Aggregated sentiment/impact across today's news for `ticker`."""
     analyzed = _get_analyzed_news(ticker)
@@ -762,7 +831,7 @@ class MarketImpactResponse(BaseModel):
     failed_tickers: List[str]
 
 
-@app.post("/news/market-impact", response_model=MarketImpactResponse)
+@app.post("/news/market-impact", response_model=MarketImpactResponse, dependencies=_AUTH)
 def get_market_impact(req: MarketImpactRequest):
     """News-driven sentiment/impact across a whole universe of tickers.
 
@@ -838,7 +907,7 @@ class ForecastContextResponse(BaseModel):
     disclaimer: str
 
 
-@app.post("/forecast/context", response_model=ForecastContextResponse)
+@app.post("/forecast/context", response_model=ForecastContextResponse, dependencies=_AUTH)
 def forecast_context(req: ForecastContextRequest):
     """Base LSTM forecast (unchanged) vs. news-context forecast, side by side.
 
@@ -866,9 +935,78 @@ def forecast_context(req: ForecastContextRequest):
     return ForecastContextResponse(**context)
 
 
+# ============== Market Quotes ==============
+#
+# The one REST endpoint every frontend needs for "current price + day
+# change" — Streamlit's `services/market.py` fetches this Python-side
+# in-process, which a separate frontend (React) can't do; this is that same
+# data (via `backend/pricing.py`, cached ~20s) over HTTP instead.
+
+class QuoteModel(BaseModel):
+    ticker: str
+    price: float
+    previous_close: float
+    change_abs: float
+    change_pct: float
+
+
+class QuotesResponse(BaseModel):
+    quotes: Dict[str, QuoteModel]
+    missing: List[str] = Field(default_factory=list)
+
+
+@app.get("/market/quotes", response_model=QuotesResponse, dependencies=_AUTH)
+def market_quotes(tickers: str):
+    """`tickers` is a comma-separated list, e.g. `?tickers=SPY,QQQ,PSI`."""
+    requested = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not requested:
+        raise HTTPException(status_code=400, detail="At least one ticker is required.")
+
+    raw = pricing.get_quotes(requested)
+    quotes = {t: QuoteModel(ticker=t, **raw[t]) for t in requested if t in raw}
+    missing = [t for t in requested if t not in raw]
+    return QuotesResponse(quotes=quotes, missing=missing)
+
+
+class OHLCBar(BaseModel):
+    time: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class OHLCResponse(BaseModel):
+    ticker: str
+    period: str
+    bars: List[OHLCBar]
+
+
+_OHLC_PERIODS = {"1mo", "3mo", "6mo", "1y", "2y", "5y"}
+
+
+@app.get("/market/ohlc", response_model=OHLCResponse, dependencies=_AUTH)
+def market_ohlc(ticker: str, period: str = "6mo"):
+    """Real OHLCV bars for one ticker — feeds the Markets page candlestick
+    chart. Never fabricates candles: an unknown ticker or a Yahoo Finance
+    failure returns an empty `bars` list, not synthetic data."""
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="A ticker is required.")
+    if period not in _OHLC_PERIODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"period must be one of {sorted(_OHLC_PERIODS)}.",
+        )
+    bars = pricing.get_ohlc(ticker, period)
+    return OHLCResponse(ticker=ticker, period=period, bars=bars)
+
+
 # ============== Health Check ==============
 
 @app.get("/health")
 def health_check():
-    """API health check endpoint."""
-    return {"status": "healthy", "version": "2.1.0"}
+    """API health check endpoint. Deliberately public — used by the
+    pre-login connectivity probe."""
+    return {"status": "healthy", "version": APP_VERSION}

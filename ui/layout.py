@@ -65,9 +65,10 @@ def _status_chips(ctx: AppContext) -> str:
             f'<span class="opt-{tone}">{c.esc(signed_money(day))}</span></span>'
         )
 
+    api_title = "Backend d'optimisation connecté" if ctx.api_online else "Backend d'optimisation hors ligne"
     api_chip = (
         f'<span class="opt-chip opt-chip--{"info" if ctx.api_online else "down"}" '
-        f'title="{"Backend d\'optimisation connecté" if ctx.api_online else "Backend d\'optimisation hors ligne"}">'
+        f'title="{api_title}">'
         f'{icon_html("api", size="0.875rem")}{"API" if ctx.api_online else "API HS"}</span>'
     )
 
@@ -167,11 +168,14 @@ def _profile_panel(ctx: AppContext) -> None:
 
 
 def topbar(ctx: AppContext) -> None:
-    """Sticky command bar: global search, market state, and account actions."""
+    """Sticky command bar: brand, global search, market state, and account actions."""
     with st.container(key="topbar"):
-        cols = st.columns([3, 4.4, 1.15, 1.05, 1.2], vertical_alignment="center")
+        cols = st.columns([1.7, 2.7, 3.8, 1.05, 1.0, 1.15], vertical_alignment="center")
 
         with cols[0]:
+            c.render(c.brand_wordmark_html(mark_size="1.5rem", text_size="0.9375rem"))
+
+        with cols[1]:
             choice = st.selectbox(
                 "Recherche globale",
                 options=list(catalog.TICKERS),
@@ -186,10 +190,10 @@ def topbar(ctx: AppContext) -> None:
                 st.session_state["global_search"] = None
                 goto("markets")
 
-        with cols[1]:
+        with cols[2]:
             _live_meta(ctx)
 
-        with cols[2]:
+        with cols[3]:
             unread = store.unread_count()
             with st.popover(str(unread), icon=st_icon("bell"), width="stretch",
                             type="secondary" if unread else "tertiary",
@@ -197,12 +201,12 @@ def topbar(ctx: AppContext) -> None:
                 c.section("Notifications", icon="bell")
                 _notifications_panel()
 
-        with cols[3]:
+        with cols[4]:
             with st.popover("Thème", icon=st_icon("theme"), width="stretch",
                             type="tertiary", help="Apparence"):
                 _appearance_panel()
 
-        with cols[4]:
+        with cols[5]:
             initials = store.user()["initials"]
             with st.popover(initials, icon=st_icon("profile"), width="stretch",
                             type="tertiary", help="Compte"):

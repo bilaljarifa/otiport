@@ -78,6 +78,10 @@ def _variables_css(palette_name: str, density: str) -> str:
         f"--opt-violet: {p['violet']}",
         f"--opt-violet-soft: {p['violet_soft']}",
         f"--opt-neutral-soft: {p['neutral_soft']}",
+        # Ambient background dressing (dark palettes only — "none" for the
+        # light "Terminal" default, see ui/tokens.py)
+        f"--opt-ambient: {p['ambient']}",
+        f"--opt-hero-glow: {p['hero_glow']}",
         # Typography
         f"--opt-font-sans: {tokens.FONT_SANS}",
         f"--opt-font-mono: {tokens.FONT_MONO}",
@@ -102,3 +106,42 @@ def inject(palette_name: str | None = None, density: str = "comfortable") -> Non
     """Inject the design tokens and the application stylesheet."""
     st.html(f"<style>{_variables_css(palette_name or tokens.DEFAULT_PALETTE, density)}</style>")
     st.html(CSS_PATH)
+
+
+def inject_light_shell() -> None:
+    """Flip the app chrome to a plain white/black shell for the two
+    unauthenticated screens (landing page, login/register) — the
+    authenticated app (`app.css`, dark palette) is left completely
+    untouched; this only overrides what those two screens need, and only
+    while they're the thing being rendered (`inject()` above still runs
+    first on every request, so signing in and getting the real shell back
+    needs no special handling).
+
+    Necessary because Streamlit's native widget chrome (background,
+    buttons, inputs, labels) is driven by `.streamlit/config.toml`'s theme,
+    which is global — it can't be conditionally swapped per screen, so the
+    override has to happen here, in CSS, scoped to this call site instead.
+    """
+    st.html("""
+    <style>
+    [data-testid="stAppViewContainer"] { background: #FFFFFF !important; background-image: none !important; }
+    [data-testid="stMain"], [data-testid="stMainBlockContainer"] { background: transparent !important; }
+    [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+    [data-testid="stHeader"] { background: transparent !important; }
+
+    [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li,
+    [data-testid="stCaptionContainer"], .stCaption,
+    label, [data-testid="stWidgetLabel"] p,
+    h1, h2, h3, h4, h5, h6 {
+        color: #0A0A0A !important;
+    }
+
+    [data-testid="stForm"] { background: transparent !important; border: none !important; }
+
+    [data-baseweb="input"], [data-baseweb="base-input"] {
+        background: #FFFFFF !important; border: 1px solid #D4D4D8 !important;
+    }
+    [data-baseweb="input"] input { color: #0A0A0A !important; }
+    [data-baseweb="input"]:focus-within { border-color: #0A0A0A !important; }
+    </style>
+    """)

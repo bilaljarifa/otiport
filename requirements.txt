@@ -15,3 +15,8 @@ altair
 python-dotenv
 transformers
 pytest
+sqlalchemy
+bcrypt
+pyjwt
+google-auth
+openai

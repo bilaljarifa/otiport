@@ -21,8 +21,17 @@ trained_models_LSTM_2000_epochs/
 .DS_Store
 Thumbs.db
 
+# Base de données de développement (SQLite) — le préfixe couvre aussi les
+# sauvegardes ponctuelles (ex. optiport.db.backup_YYYYMMDD_HHMMSS)
+optiport.db*
+*.db-journal
+
 # Secrets éventuels (par sécurité — aucun n'est présent aujourd'hui)
 *.env
 .env
 *.pem
 *.key
+
+# Local dev tooling — machine-specific, not part of the application
+.claude/
+.run/

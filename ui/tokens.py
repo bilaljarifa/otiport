@@ -62,6 +62,13 @@ MIDNIGHT: Final[dict[str, str]] = {
     "violet": "#8B5CF6",
     "violet_soft": "rgba(139, 92, 246, 0.12)",
     "neutral_soft": "rgba(148, 163, 184, 0.12)",
+    # Ambient background dressing — dark palettes only, see TERMINAL below.
+    "ambient": (
+        "radial-gradient(1100px 620px at 12% -8%, rgba(59, 130, 246, 0.10), transparent 60%), "
+        "radial-gradient(900px 560px at 92% 4%, rgba(139, 92, 246, 0.07), transparent 62%), "
+        "radial-gradient(1200px 800px at 50% 110%, rgba(6, 182, 212, 0.05), transparent 65%)"
+    ),
+    "hero_glow": "radial-gradient(120% 140% at 0% 0%, rgba(59, 130, 246, 0.16), transparent 55%)",
 }
 
 GRAPHITE: Final[dict[str, str]] = {
@@ -82,16 +89,64 @@ GRAPHITE: Final[dict[str, str]] = {
     "text_faint": "#868E9C",
 }
 
+# The primary Optiport experience: a flat, professional light "terminal"
+# theme — white/near-black/gray, no gradients, no purple/blue accent. The
+# sidebar stays a dark nav rail (a deliberate, common institutional pattern:
+# dark chrome around a light workspace, not a fully white app) — everything
+# else is white/near-white. Green/red are reserved for market up/down only;
+# "accent" here is near-black, not a hue, so buttons/links/focus rings read
+# as ink, not brand-color decoration.
+TERMINAL: Final[dict[str, str]] = {
+    "bg_root": "#FFFFFF",
+    "bg": "#FFFFFF",
+    "bg_alt": "#FAFAFA",
+    "surface": "#FFFFFF",
+    "surface_hi": "#F4F4F5",
+    "surface_low": "#FAFAFA",
+    "sidebar": "#0A0A0A",
+    "sidebar_hi": "#171717",
+    "border": "#E4E4E7",
+    "border_soft": "rgba(228, 228, 231, 0.8)",
+    "border_strong": "#D4D4D8",
+    "text": "#0A0A0A",
+    "text_soft": "#18181B",
+    "text_muted": "#52525B",
+    "text_faint": "#71717A",
+    "accent": "#0A0A0A",
+    "accent_hi": "#262626",
+    "accent_lo": "#000000",
+    "accent_soft": "rgba(10, 10, 10, 0.05)",
+    "accent_glow": "rgba(10, 10, 10, 0.14)",
+    "up": "#16A34A",
+    "up_soft": "rgba(22, 163, 74, 0.10)",
+    "up_text": "#15803D",
+    "down": "#DC2626",
+    "down_soft": "rgba(220, 38, 38, 0.10)",
+    "down_text": "#B91C1C",
+    "warn": "#D97706",
+    "warn_soft": "rgba(217, 119, 6, 0.10)",
+    "warn_text": "#B45309",
+    "info": "#0369A1",
+    "info_soft": "rgba(3, 105, 161, 0.10)",
+    "violet": "#6D28D9",
+    "violet_soft": "rgba(109, 40, 217, 0.08)",
+    "neutral_soft": "rgba(113, 113, 122, 0.08)",
+    "ambient": "none",
+    "hero_glow": "none",
+}
+
 PALETTES: Final[dict[str, dict[str, str]]] = {
+    "terminal": TERMINAL,
     "midnight": MIDNIGHT,
     "graphite": GRAPHITE,
 }
 
-DEFAULT_PALETTE: Final[str] = "midnight"
+DEFAULT_PALETTE: Final[str] = "terminal"
 
 PALETTE_LABELS: Final[dict[str, str]] = {
-    "midnight": "Midnight",
-    "graphite": "Graphite",
+    "terminal": "Terminal (light)",
+    "midnight": "Midnight (dark)",
+    "graphite": "Graphite (dark)",
 }
 
 
@@ -118,15 +173,17 @@ SPACING: Final[dict[str, str]] = {
 }
 
 # ---------------------------------------------------------------------------
-#  Radius
+#  Radius — crisp, institutional corners (not the rounded "consumer app"
+#  look). Pill stays sharp-cornerless only for chips/badges, where a full
+#  stadium shape is the standard, expected convention, not decoration.
 # ---------------------------------------------------------------------------
 RADIUS: Final[dict[str, str]] = {
-    "xs": "0.25rem",
-    "sm": "0.5rem",
-    "md": "0.75rem",
-    "lg": "1rem",
-    "xl": "1.25rem",
-    "2xl": "1.5rem",
+    "xs": "0.1875rem",
+    "sm": "0.25rem",
+    "md": "0.375rem",
+    "lg": "0.5rem",
+    "xl": "0.625rem",
+    "2xl": "0.75rem",
     "pill": "999px",
 }
 

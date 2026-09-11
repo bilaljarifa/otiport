@@ -18,31 +18,34 @@ showErrorDetails = "full"
 level = "warning"
 
 # ---------------------------------------------------------------------------
-#  Core theme — "Midnight" dark financial palette
+#  Core theme — "Terminal" light financial palette (primary experience).
+#  "Midnight"/"Graphite" remain selectable from Settings — see ui/tokens.py —
+#  but native Streamlit widgets always follow this base theme; ui/styles.py's
+#  CSS variables layer on top for the custom .opt-* components.
 # ---------------------------------------------------------------------------
 [theme]
-base = "dark"
+base = "light"
 
 # Surfaces
-backgroundColor = "#0B1220"          # app background
-secondaryBackgroundColor = "#1E293B" # cards, inputs, code blocks
-textColor = "#F8FAFC"
-primaryColor = "#3B82F6"
+backgroundColor = "#FFFFFF"          # app background
+secondaryBackgroundColor = "#F4F4F5" # cards, inputs, code blocks
+textColor = "#0A0A0A"
+primaryColor = "#0A0A0A"
 
 # Borders & separators
-borderColor = "#334155"
-dataframeBorderColor = "#334155"
-dataframeHeaderBackgroundColor = "#16213A"
+borderColor = "#E4E4E7"
+dataframeBorderColor = "#E4E4E7"
+dataframeHeaderBackgroundColor = "#FAFAFA"
 showWidgetBorder = true
-showSidebarBorder = true
+showSidebarBorder = false
 
 # Links
-linkColor = "#60A5FA"
-linkUnderline = false
+linkColor = "#0A0A0A"
+linkUnderline = true
 
-# Radius scale
-baseRadius = "0.75rem"
-buttonRadius = "0.625rem"
+# Radius scale — crisp, institutional corners, not the rounded "app" look.
+baseRadius = "0.375rem"
+buttonRadius = "0.25rem"
 
 # Typography — Inter loaded from Google Fonts with system fallbacks.
 # If the CDN is unreachable the stack degrades to the platform UI font.
@@ -60,31 +63,32 @@ metricValueFontWeight = 700
 
 # Semantic colors — used by st.metric deltas, st.badge, alerts and
 # markdown color syntax so that every signal reads the same everywhere.
-greenColor = "#22C55E"
-redColor = "#EF4444"
-orangeColor = "#F59E0B"
-yellowColor = "#EAB308"
-blueColor = "#3B82F6"
-violetColor = "#8B5CF6"
-grayColor = "#94A3B8"
+# Green/red are reserved for market up/down; nothing else uses hue as decoration.
+greenColor = "#16A34A"
+redColor = "#DC2626"
+orangeColor = "#D97706"
+yellowColor = "#CA8A04"
+blueColor = "#0369A1"
+violetColor = "#6D28D9"
+grayColor = "#71717A"
 
-greenTextColor = "#4ADE80"
-redTextColor = "#F87171"
-orangeTextColor = "#FBBF24"
-blueTextColor = "#60A5FA"
-violetTextColor = "#A78BFA"
-grayTextColor = "#94A3B8"
+greenTextColor = "#15803D"
+redTextColor = "#B91C1C"
+orangeTextColor = "#B45309"
+blueTextColor = "#075985"
+violetTextColor = "#5B21B6"
+grayTextColor = "#52525B"
 
-greenBackgroundColor = "#122B20"
-redBackgroundColor = "#2D1519"
-orangeBackgroundColor = "#2D2211"
-yellowBackgroundColor = "#2B2510"
-blueBackgroundColor = "#12203D"
-violetBackgroundColor = "#1F1738"
-grayBackgroundColor = "#1B2436"
+greenBackgroundColor = "#F0FDF4"
+redBackgroundColor = "#FEF2F2"
+orangeBackgroundColor = "#FFFBEB"
+yellowBackgroundColor = "#FEFCE8"
+blueBackgroundColor = "#F0F9FF"
+violetBackgroundColor = "#F5F3FF"
+grayBackgroundColor = "#FAFAFA"
 
-codeTextColor = "#7DD3FC"
-codeBackgroundColor = "#0E1A2E"
+codeTextColor = "#0A0A0A"
+codeBackgroundColor = "#F4F4F5"
 
 # Chart palettes — every chart in the app pulls from these so series colors
 # stay identical between Plotly, Altair and Streamlit native charts.
@@ -102,15 +106,16 @@ chartDivergingColors = [
 ]
 
 # ---------------------------------------------------------------------------
-#  Sidebar — slightly deeper surface than the app body so the fixed
-#  navigation rail reads as a distinct layer (glass effect added in CSS).
+#  Sidebar — deliberately kept dark against the light app body: a dark nav
+#  rail around a light workspace is a common, professional institutional
+#  pattern (not a leftover of the old all-dark theme).
 # ---------------------------------------------------------------------------
 [theme.sidebar]
-backgroundColor = "#080E1A"
-secondaryBackgroundColor = "#141F35"
-textColor = "#E2E8F0"
-primaryColor = "#3B82F6"
-borderColor = "#1E2A42"
-baseRadius = "0.625rem"
-buttonRadius = "0.5rem"
-showWidgetBorder = true
+backgroundColor = "#0A0A0A"
+secondaryBackgroundColor = "#171717"
+textColor = "#E4E4E7"
+primaryColor = "#FFFFFF"
+borderColor = "#27272A"
+baseRadius = "0.375rem"
+buttonRadius = "0.375rem"
+showWidgetBorder = false

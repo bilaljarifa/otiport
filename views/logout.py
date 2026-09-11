@@ -40,9 +40,9 @@ with columns[0]:
     with c.card(key="signoutaction"):
         c.section("Quitter la plateforme", icon="logout")
         st.info(
-            "L'état de la session (positions, ordres, alertes) est conservé "
-            "tant que le serveur Streamlit reste actif : vous pourrez revenir "
-            "et reprendre là où vous en étiez.",
+            "Votre portefeuille simulé (positions, ordres, transactions, "
+            "alertes) est conservé sur le serveur : reconnectez-vous avec "
+            "votre compte pour le retrouver tel quel.",
             icon=st_icon("info"),
         )
         actions = st.columns(2)
@@ -60,8 +60,8 @@ with columns[1]:
         c.kv_list([
             ("Compte", c.chip_html(store.ACCOUNT_MODE, tone="warn", icon="shield")),
             ("Ordres réels", c.chip_html("Aucun", tone="up", icon="check")),
-            ("Données personnelles", c.chip_html("Aucune collecte", tone="up",
-                                                 icon="check")),
+            ("Mot de passe", c.chip_html("Jamais stocké en clair", tone="up",
+                                         icon="check")),
         ])
         c.caption(
             "Aucun ordre n'a été transmis à un courtier : l'ensemble des "

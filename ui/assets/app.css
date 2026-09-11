@@ -105,12 +105,11 @@ html, body, [class*="st-emotion"]:not([data-testid="stIconMaterial"]) {
 
 [data-testid="stAppViewContainer"] {
   background-color: var(--opt-bg);
-  /* Layered ambient light: two soft accent pools plus a vignette. Fixed
-     attachment keeps the light still while content scrolls. */
-  background-image:
-    radial-gradient(1100px 620px at 12% -8%, rgba(59, 130, 246, 0.10), transparent 60%),
-    radial-gradient(900px 560px at 92% 4%, rgba(139, 92, 246, 0.07), transparent 62%),
-    radial-gradient(1200px 800px at 50% 110%, rgba(6, 182, 212, 0.05), transparent 65%);
+  /* Per-palette ambient glow (dark palettes only — see ui/tokens.py). The
+     light "Terminal" palette sets this to `none`: a flat white surface,
+     not a colorful gradient wash. Fixed attachment keeps it still while
+     content scrolls. */
+  background-image: var(--opt-ambient);
   background-attachment: fixed;
   background-repeat: no-repeat;
 }
@@ -149,6 +148,28 @@ html, body, [class*="st-emotion"]:not([data-testid="stIconMaterial"]) {
    ========================================================================== */
 
 [data-testid="stSidebar"] {
+  /* The sidebar is a dark nav rail regardless of the active palette (see
+     ui/tokens.py) — including on the light "Terminal" default, where the
+     rest of the app is white. Re-scope every text/surface/border token to
+     dark-surface values here so `.opt-*` components (built against
+     var(--opt-text) etc.) stay legible without any component-level
+     light/dark branching: everything downstream just asks for "the text
+     color" and gets the right one for the surface it's actually on. */
+  --opt-text: #FFFFFF;
+  --opt-text-soft: #E4E4E7;
+  --opt-text-muted: #A1A1AA;
+  --opt-text-faint: #71717A;
+  --opt-surface: #171717;
+  --opt-surface-hi: #1F1F1F;
+  --opt-surface-low: #141414;
+  --opt-border: #27272A;
+  --opt-border-soft: rgba(255, 255, 255, 0.08);
+  --opt-border-strong: #3F3F46;
+  --opt-accent: #FFFFFF;
+  --opt-accent-hi: #FFFFFF;
+  --opt-accent-soft: rgba(255, 255, 255, 0.08);
+  --opt-accent-glow: rgba(255, 255, 255, 0.18);
+
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--opt-sidebar) 92%, transparent) 0%,
@@ -293,7 +314,7 @@ html, body, [class*="st-emotion"]:not([data-testid="stIconMaterial"]) {
 /* Accent variant used for primary/hero cards. */
 [class*="st-key-opthero"] {
   background:
-    radial-gradient(120% 140% at 0% 0%, rgba(59, 130, 246, 0.16), transparent 55%),
+    var(--opt-hero-glow),
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 45%),
     var(--opt-surface);
   border: 1px solid color-mix(in srgb, var(--opt-accent) 24%, var(--opt-border)) !important;
@@ -362,7 +383,7 @@ hr, [data-testid="stDivider"] { border-color: var(--opt-border-soft); }
 [data-testid="stBaseButton-secondary"]:hover {
   background: var(--opt-surface-hi);
   border-color: var(--opt-border-strong);
-  color: #fff;
+  color: var(--opt-text);
 }
 [data-testid="stBaseButton-tertiary"] { color: var(--opt-text-muted); }
 [data-testid="stBaseButton-tertiary"]:hover { color: var(--opt-accent-hi); }
@@ -586,9 +607,12 @@ input::placeholder, textarea::placeholder { color: var(--opt-text-faint) !import
 .opt-chip--down { color: var(--opt-down-text); background: var(--opt-down-soft); border-color: color-mix(in srgb, var(--opt-down) 30%, transparent); }
 .opt-chip--warn { color: var(--opt-warn-text); background: var(--opt-warn-soft); border-color: color-mix(in srgb, var(--opt-warn) 30%, transparent); }
 .opt-chip--info { color: var(--opt-accent-hi); background: var(--opt-accent-soft); border-color: color-mix(in srgb, var(--opt-accent) 30%, transparent); }
-.opt-chip--violet { color: #C4B5FD; background: var(--opt-violet-soft); border-color: color-mix(in srgb, var(--opt-violet) 30%, transparent); }
+.opt-chip--violet { color: var(--opt-violet); background: var(--opt-violet-soft); border-color: color-mix(in srgb, var(--opt-violet) 30%, transparent); }
 .opt-chip--flat { color: var(--opt-text-muted); background: var(--opt-neutral-soft); }
-.opt-chip--strong { color: #fff; }
+/* Solid, inverted pill for the one emphasized metric in a chip row (e.g. the
+   topbar's portfolio value) — was white-text-only, which relied on the old
+   dark theme's dark chip background; now explicit so it still has one. */
+.opt-chip--strong { color: #fff; background: var(--opt-accent); border-color: var(--opt-accent); }
 .opt-chip__mono { font-family: var(--opt-font-mono); }
 
 /* Live pulse dot */
@@ -666,7 +690,7 @@ input::placeholder, textarea::placeholder { color: var(--opt-text-faint) !import
   letter-spacing: -0.025em;
   line-height: 1.1;
   margin: 0.125rem 0 0;
-  background: linear-gradient(180deg, #fff 30%, color-mix(in srgb, #fff 62%, var(--opt-text-muted)));
+  background: linear-gradient(180deg, var(--opt-text) 30%, color-mix(in srgb, var(--opt-text) 62%, var(--opt-text-muted)));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -871,7 +895,7 @@ input::placeholder, textarea::placeholder { color: var(--opt-text-faint) !import
 .opt-table .opt-td--up { color: var(--opt-up-text); font-weight: 600; }
 .opt-table .opt-td--down { color: var(--opt-down-text); font-weight: 600; }
 .opt-table .opt-td--muted { color: var(--opt-text-faint); }
-.opt-table .opt-td--strong { color: #fff; font-weight: 600; }
+.opt-table .opt-td--strong { color: var(--opt-text); font-weight: 600; }
 
 /* Instrument identity cell */
 .opt-idcell { display: flex; align-items: center; gap: 0.625rem; }
@@ -1280,12 +1304,15 @@ a.opt-feed__title:hover { color: var(--opt-accent-hi); }
   .opt-bar__fill { width: var(--opt-bar-w, 0%); }
 }
 
-/* Higher contrast borders when the user asks for more contrast. */
+/* Higher contrast borders when the user asks for more contrast. Tuned for
+   the light "Terminal" default (darker grays read as higher-contrast on
+   white); still a legibility improvement, if a less precisely-tuned one,
+   for the dark Midnight/Graphite palettes. */
 @media (prefers-contrast: more) {
   :root {
-    --opt-border: #5A6B85;
-    --opt-border-soft: #4A5A73;
-    --opt-text-muted: #B6C2D4;
+    --opt-border: #71717A;
+    --opt-border-soft: #52525B;
+    --opt-text-muted: #3F3F46;
   }
 }
 

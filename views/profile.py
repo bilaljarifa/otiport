@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from services import catalog, store
+from services import api_client, catalog, store
 from services.context import get as get_context
 from ui import components as c, layout, styles, tokens
 from ui.format import money, percent, signed_money, signed_percent, time_ago
@@ -55,14 +55,18 @@ with header[0]:
 
         if st.button("Mettre à jour le profil", type="primary", width="stretch",
                      icon=st_icon("check"), key="profile_save"):
-            initials = "".join(part[0] for part in name.split()[:2]).upper() or "OP"
-            store.user().update(name=name, role=role, desk=desk, initials=initials)
-            st.toast("Profil mis à jour", icon="✅")
-            st.rerun()
+            try:
+                store.update_profile(name=name, job_title=role, desk=desk)
+            except api_client.ApiError as exc:
+                st.error(exc.detail or str(exc))
+            else:
+                st.toast("Profil mis à jour", icon="✅")
+                st.rerun()
 
         c.caption(
-            "Ces informations restent locales à la session : aucune donnée "
-            "personnelle n'est transmise ni stockée côté serveur."
+            "Le nom, la fonction et le desk sont enregistrés sur votre compte. "
+            "Le nom d'utilisateur, l'e-mail et le mot de passe ne se modifient "
+            "pas depuis cette page."
         )
 
 with header[1]:
@@ -141,18 +145,19 @@ with body[1]:
     with c.card(key="security"):
         c.section("Sécurité et données", icon="lock")
         c.kv_list([
-            ("Authentification", c.chip_html("Espace de démonstration", tone="flat",
-                                             icon="info")),
-            ("Données personnelles", c.chip_html("Aucune collecte", tone="up",
-                                                 icon="check")),
-            ("Persistance", c.chip_html("Session uniquement", tone="warn",
-                                        icon="clock")),
+            ("Compte", c.chip_html(profile["username"], tone="info", icon="profile")),
+            ("Rôle", c.chip_html(
+                "Administrateur" if store.is_admin() else "Utilisateur",
+                tone="warn" if store.is_admin() else "flat",
+                icon="shield" if store.is_admin() else "info")),
+            ("Mot de passe", c.chip_html("Haché (bcrypt), jamais stocké en clair",
+                                         tone="up", icon="check")),
             ("Ordres réels", c.chip_html("Jamais transmis", tone="up", icon="shield")),
         ])
         c.caption(
-            "Optiport ne demande aucun identifiant, ne stocke aucun moyen de "
-            "paiement et n'est connecté à aucun courtier. L'état de la session "
-            "est perdu au redémarrage du serveur."
+            "Optiport ne stocke aucun moyen de paiement et n'est connecté à "
+            "aucun courtier. Votre portefeuille simulé est propre à votre "
+            "compte et n'est visible par aucun autre utilisateur."
         )
         st.write("")
         if st.button("Se déconnecter", width="stretch", type="secondary",

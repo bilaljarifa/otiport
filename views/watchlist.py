@@ -47,7 +47,7 @@ with c.card(key="manage"):
     )
     if columns[1].button("Appliquer", type="primary", width="stretch",
                          icon=st_icon("check"), key="watchlist_apply"):
-        st.session_state["watchlist"] = list(selection)
+        store.set_watchlist(selection)
         st.toast("Liste de suivi mise à jour", icon="✅")
         st.rerun()
 

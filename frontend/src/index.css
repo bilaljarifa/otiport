@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+/*
+ * Optiport design tokens — premium white + black financial-terminal system.
+ * White is the dominant surface everywhere, including the sidebar and
+ * top nav — there is no dark-mode-first treatment anywhere in the app.
+ * Black is reserved for typography and the primary-button hover state;
+ * blue is a restrained accent used only where an action genuinely needs
+ * one (never the default for navigation/auth buttons); green/red are
+ * reserved for market up/down only.
+ */
+@theme {
+  --color-ink: #111111;
+  --color-ink-muted: #666666;
+  --color-ink-faint: #8a8a8a;
+
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f7f7;
+  --color-surface-soft: #f0f0f0;
+
+  --color-line: #e5e5e5;
+  --color-line-strong: #d0d0d0;
+  --color-line-soft: #f0f0f0;
+
+  --color-up: #16a34a;
+  --color-up-soft: #f0fdf4;
+  --color-down: #dc2626;
+  --color-down-soft: #fef2f2;
+
+  --color-accent: #2563eb;
+  --color-accent-soft: #eff6ff;
+  --color-accent-hover: #1d4ed8;
+
+  /*
+   * Deliberately theme-invariant (not redefined under [data-theme="dark"]):
+   * this is the fill behind white button text specifically. `--color-accent`
+   * itself has to lighten in dark mode to stay legible as *plain text* on a
+   * dark background (see `hover:text-accent` in AppShell), but that lighter
+   * blue drops white-on-fill contrast to ~2.75:1 — below WCAG AA. Buttons
+   * use this pair instead so the fill/white-text combination always passes
+   * regardless of theme.
+   */
+  --color-accent-strong: #2563eb;
+  --color-accent-strong-hover: #1d4ed8;
+
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+:root {
+  color-scheme: light;
+  --app-bg: #ffffff;
+  --chart-grid: #f1f3f5;
+  --chart-text: #667085;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ink: #f4f7fb;
+  --color-ink-muted: #aab6c5;
+  --color-ink-faint: #7f8b9a;
+  --color-surface: #10151c;
+  --color-surface-alt: #171e27;
+  --color-surface-soft: #202936;
+  --color-line: #2b3542;
+  --color-line-strong: #455364;
+  --color-line-soft: #1c242e;
+  --color-accent-soft: #172f52;
+  --color-accent: #5b9cff;
+  --color-accent-hover: #83b5ff;
+  --color-up-soft: #123522;
+  --color-down-soft: #421d23;
+  --app-bg: #10151c;
+  --chart-grid: #26303b;
+  --chart-text: #aab6c5;
+}
+
+body {
+  background: var(--app-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/*
+ * Public/marketing pages (Landing, Login, Register) are always the
+ * premium light brand experience, regardless of the authenticated app's
+ * dark-mode preference. Without this, a signed-in user who enabled dark
+ * mode and then logs out (a client-side route change, not a full page
+ * reload) keeps `data-theme="dark"` on <html> — these pages never toggle
+ * it themselves — and hardcoded-contrast elements (the black CTA panel,
+ * the logo mark) would render illegibly. Pinning every token back to its
+ * light value here makes that impossible independent of ancestor state.
+ */
+.theme-light-forced {
+  color-scheme: light;
+  --color-ink: #111111;
+  --color-ink-muted: #666666;
+  --color-ink-faint: #8a8a8a;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f7f7;
+  --color-surface-soft: #f0f0f0;
+  --color-line: #e5e5e5;
+  --color-line-strong: #d0d0d0;
+  --color-line-soft: #f0f0f0;
+  --color-up-soft: #f0fdf4;
+  --color-down-soft: #fef2f2;
+  --color-accent-soft: #eff6ff;
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --app-bg: #ffffff;
+  --chart-grid: #f1f3f5;
+  --chart-text: #667085;
+  background: var(--app-bg);
+  color: var(--color-ink);
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}

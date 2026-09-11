@@ -15,16 +15,38 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from services import store
 from ui import tokens
 
 # ---------------------------------------------------------------------------
 #  Palette helpers
 # ---------------------------------------------------------------------------
 
-_P = tokens.MIDNIGHT
 
-GRID = "rgba(51, 65, 85, 0.35)"
-AXIS = "rgba(51, 65, 85, 0.55)"
+class _ActivePalette:
+    """Resolves the *current* palette (Settings > Appearance, default the
+    light "Terminal" theme) on every lookup, instead of a palette frozen at
+    import time. Charts must follow the user's actual theme choice — every
+    `_P[...]` call below (there are ~50 of them) stays syntactically
+    unchanged; only what it resolves to becomes dynamic."""
+
+    def __getitem__(self, key: str) -> str:
+        try:
+            name = store.prefs().get("palette")
+        except Exception:
+            name = None
+        return tokens.palette(name)[key]
+
+
+_P = _ActivePalette()
+
+
+def _grid() -> str:
+    return rgba(_P["border"], 0.5)
+
+
+def _axis() -> str:
+    return rgba(_P["border"], 0.7)
 
 CONFIG: dict[str, Any] = {
     "displayModeBar": False,
@@ -108,15 +130,15 @@ def _base(fig: go.Figure, *, height: int = 280, legend: bool = False,
     fig.update_xaxes(
         showgrid=False,
         zeroline=False,
-        linecolor=AXIS,
-        tickcolor=AXIS,
+        linecolor=_axis(),
+        tickcolor=_axis(),
         ticklen=4,
         tickfont=dict(size=11, color=_P["text_faint"]),
         showspikes=False,
     )
     fig.update_yaxes(
         showgrid=True,
-        gridcolor=GRID,
+        gridcolor=_grid(),
         gridwidth=1,
         zeroline=False,
         showline=False,
@@ -443,7 +465,7 @@ def hbar(
     )
     _base(fig, height=height, hovermode="y unified", margin={"l": 4, "r": 40})
     fig.update_xaxes(
-        showgrid=True, gridcolor=GRID, showline=False, ticksuffix=suffix,
+        showgrid=True, gridcolor=_grid(), showline=False, ticksuffix=suffix,
         range=[0, (max_value or max(values, default=1)) * 1.18],
     )
     fig.update_yaxes(showgrid=False, tickfont=dict(size=11.5, color=_P["text_muted"]))
@@ -503,7 +525,7 @@ def signed_bar(
     fig.update_layout(bargap=0.35)
     if horizontal:
         fig.add_vline(x=0, line=dict(color=_P["border_strong"], width=1))
-        fig.update_xaxes(showgrid=True, gridcolor=GRID, ticksuffix=suffix)
+        fig.update_xaxes(showgrid=True, gridcolor=_grid(), ticksuffix=suffix)
         fig.update_yaxes(showgrid=False)
     else:
         fig.add_hline(y=0, line=dict(color=_P["border_strong"], width=1))
@@ -602,7 +624,7 @@ def efficient_frontier(
     _base(fig, height=height, legend=True, hovermode="closest", margin={"t": 30, "l": 48, "b": 44})
     fig.update_xaxes(title=dict(text="Volatilité annualisée (%)",
                                 font=dict(size=11, color=_P["text_faint"])),
-                     showgrid=True, gridcolor=GRID)
+                     showgrid=True, gridcolor=_grid())
     fig.update_yaxes(title=dict(text="Rendement attendu (%)",
                                 font=dict(size=11, color=_P["text_faint"])))
     return fig
@@ -654,7 +676,7 @@ def scatter_risk_return(
     )
     _base(fig, height=height, hovermode="closest", margin={"t": 16, "l": 48, "b": 44})
     fig.update_xaxes(title=dict(text="Volatilité (%)", font=dict(size=11, color=_P["text_faint"])),
-                     showgrid=True, gridcolor=GRID)
+                     showgrid=True, gridcolor=_grid())
     fig.update_yaxes(title=dict(text="Rendement attendu (%)",
                                 font=dict(size=11, color=_P["text_faint"])))
     return fig

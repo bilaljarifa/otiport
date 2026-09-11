@@ -187,6 +187,38 @@ def avatar_html(initials: str, *, large: bool = False) -> str:
     return f'<span class="opt-avatar{size}">{esc(initials[:2].upper())}</span>'
 
 
+def brand_mark_html(*, size: str = "2.25rem", color: str = "#0A0A0A") -> str:
+    """Optiport's geometric mark: three ascending bars inside a square frame
+    — the same symbol as `ui/assets/logo-mark.svg` (used on the dark
+    sidebar via `st.logo`), redrawn with plain `<span>`s instead of `<svg>`
+    so it can appear inside `st.html()`-rendered markup, which strips SVG
+    entirely (DOMPurify's HTML profile). `color` lets the same mark work on
+    both the dark sidebar's white-on-transparent SVG and this light,
+    recolourable HTML version — same shape, adapted per surface, not two
+    unrelated logos.
+    """
+    bar = lambda h: f'<span style="width:18%;height:{h}%;background:{color}"></span>'
+    return (
+        f'<span style="display:inline-flex;align-items:flex-end;justify-content:center;'
+        f"gap:2px;width:{size};height:{size};border:1.5px solid {color};border-radius:4px;"
+        f'padding:3px;box-sizing:border-box;flex-shrink:0">'
+        f'{bar(35)}{bar(60)}{bar(90)}</span>'
+    )
+
+
+def brand_wordmark_html(*, mark_size: str = "2rem", color: str = "#0A0A0A",
+                        text_size: str = "1.25rem") -> str:
+    """Mark + "OPTIPORT" wordmark for light backgrounds (landing page,
+    login/register). The dark sidebar keeps its own SVG lockup via
+    `st.logo` — same mark (see `brand_mark_html`), dark-surface variant."""
+    return (
+        '<span style="display:inline-flex;align-items:center;gap:0.625rem">'
+        f"{brand_mark_html(size=mark_size, color=color)}"
+        f'<span style="font-weight:800;font-size:{text_size};letter-spacing:0.03em;'
+        f'color:{color}">OPTIPORT</span></span>'
+    )
+
+
 def mark_color(symbol: str) -> str:
     """Deterministic accent colour for a ticker, stable across sessions."""
     digest = hashlib.md5(symbol.encode("utf-8")).hexdigest()  # noqa: S324 - display only

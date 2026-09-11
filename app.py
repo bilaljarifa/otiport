@@ -39,7 +39,7 @@ from services import api_client, catalog, market, store  # noqa: E402
 from services.context import AppContext, publish  # noqa: E402
 from ui import layout, styles  # noqa: E402
 from ui.icons import st_icon  # noqa: E402
-from views import auth  # noqa: E402
+from views import auth, landing  # noqa: E402
 
 ASSETS = Path(__file__).parent / "ui" / "assets"
 
@@ -49,11 +49,22 @@ ASSETS = Path(__file__).parent / "ui" / "assets"
 # ---------------------------------------------------------------------------
 
 def build_context() -> AppContext:
-    """Fetch market data once per run and mark the account to market."""
+    """Fetch market data once per run and mark the account to market.
+
+    Also settles the backend account (fills crossed limit orders, triggers
+    price alerts) and syncs the resulting positions/orders/transactions/
+    watchlist/alerts snapshot into session state. `refresh_portfolio()` is
+    throttled (a few seconds) rather than unconditional: Streamlit reruns
+    this on *every* widget interaction anywhere in the app, not just page
+    navigation, and neither the account nor market prices meaningfully
+    change between two clicks a second apart. A mutation (placing an order,
+    toggling a watchlist entry, ...) always refreshes immediately regardless
+    of this — see `services/store.py`.
+    """
     universe = tuple(dict.fromkeys((*catalog.TICKERS, catalog.BENCHMARK)))
     quotes = market.snapshot(universe)
 
-    store.settle(quotes)
+    store.refresh_portfolio()
     valuation = store.valuation(quotes)
 
     return AppContext(
@@ -65,7 +76,14 @@ def build_context() -> AppContext:
 
 
 def navigation() -> tuple[Any, dict[str, Any]]:
-    """Declare the navigation tree, grouped into sidebar sections."""
+    """Declare the navigation tree, grouped into sidebar sections.
+
+    The "Administration" section/page is only *added* to the tree for admins
+    — a convenience so non-admins never see it. It is not the security
+    boundary: every `/admin/*` backend call independently re-checks the
+    caller's role (`backend/deps.py::require_admin`), so a non-admin cannot
+    reach admin data even by guessing the page's URL path.
+    """
     pages = {
         "dashboard": st.Page("views/dashboard.py", title="Dashboard",
                              icon=st_icon("dashboard"), url_path="dashboard", default=True),
@@ -102,8 +120,14 @@ def navigation() -> tuple[Any, dict[str, Any]]:
         "Intelligence": [pages["news"], pages["news_analysis"], pages["alerts"]],
         "Compte": [pages["settings"], pages["profile"], pages["logout"]],
     }
+
+    if store.is_admin():
+        pages["admin"] = st.Page("views/admin.py", title="Administration",
+                                 icon=st_icon("shield"), url_path="admin")
+        sections["Administration"] = [pages["admin"]]
+
     # `expanded=True` keeps every section open: the sidebar is the primary
-    # navigation surface and all twelve destinations must stay one click away.
+    # navigation surface and every destination must stay one click away.
     return st.navigation(sections, expanded=True), pages
 
 
@@ -112,10 +136,21 @@ def main() -> None:
     preferences = store.prefs()
     styles.inject(preferences["palette"], preferences["density"])
 
-    # Sign-in gate. Deliberately credential-free: this is a demo workspace, so
-    # there is nothing to authenticate against and no password is ever asked.
-    if not st.session_state.get("signed_in", True):
-        auth.signed_out_screen()
+    # Auth gate: no token in session state -> show the public landing page
+    # (or, once the visitor has clicked through, the login/register form)
+    # instead of the app shell. `navigation()`/`nav.run()` below — the only
+    # place any protected page gets registered or executed — is never
+    # reached in this branch, so manually navigating to a page URL (e.g.
+    # `?page=dashboard`) while signed out still lands here, not on a
+    # protected page: Streamlit has nothing registered for that path in this
+    # run. This is a UX convenience, not the actual security boundary —
+    # every backend endpoint independently rejects an absent/invalid/
+    # expired/revoked token regardless (see backend/deps.py).
+    if not store.is_authenticated():
+        if store.auth_view() == "landing":
+            landing.landing_page()
+        else:
+            auth.auth_screen()
         return
 
     st.logo(
