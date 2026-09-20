@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from backend import pricing
 from backend.google_oauth import GoogleProfile
 from backend.models import Account, Alert, Order, Position, Transaction, User, WatchlistItem
 from backend.security import hash_password, verify_password
+from backend.stripe_service import plan_from_price_id
 
 _USERNAME_CHARS = re.compile(r"[^a-zA-Z0-9_.-]")
 
@@ -109,7 +110,15 @@ def get_or_create_google_user(db: Session, profile: GoogleProfile) -> User:
     """Find the user for a verified Google identity, linking or creating an
     account as needed. New accounts get a random, never-shared password
     hash (see `User.google_sub`'s docstring) and the same $250,000
-    simulated account every registration gets (`create_user`)."""
+    simulated account every registration gets (`create_user`).
+
+    Account-takeover safety: a Google identity is only ever linked to an
+    *existing* local account when Google itself reports the email as
+    verified (`email_verified`) — an unverified email could belong to
+    someone else who merely typed it into a Google account they don't
+    control, so silently linking on email match alone would let them take
+    over that account. Matching is always by `google_sub` (Google's own
+    stable, unguessable per-account id) first, never by email alone."""
     existing = get_user_by_google_sub(db, profile.sub)
     if existing is not None:
         return existing
@@ -131,6 +140,76 @@ def get_or_create_google_user(db: Session, profile: GoogleProfile) -> User:
         password=secrets.token_urlsafe(32), full_name=profile.full_name,
     )
     user.google_sub = profile.sub
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def get_user_by_stripe_customer_id(db: Session, customer_id: str) -> User | None:
+    return db.query(User).filter(User.stripe_customer_id == customer_id).first()
+
+
+def set_stripe_customer_id(db: Session, user: User, customer_id: str) -> User:
+    user.stripe_customer_id = customer_id
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def apply_subscription_state(db: Session, user: User, subscription: dict) -> User:
+    """Syncs the user's cached plan/status/period fields from a Stripe
+    Subscription object (or an equivalently-shaped plain dict in tests) —
+    the one place "what plan does this subscription mean" is decided, used
+    by every webhook event that carries a subscription. Stripe is
+    authoritative: an active/trialing subscription on a price this
+    deployment recognizes sets the paid plan; anything else (canceled,
+    incomplete_expired, unpaid, or a price this deployment doesn't map to a
+    plan) falls back to "free" rather than leaving a user on a paid plan a
+    subscription no longer actually backs."""
+    items = subscription.get("items", {}).get("data", [])
+    price_id = items[0]["price"]["id"] if items else None
+    plan = plan_from_price_id(price_id)
+    status = subscription.get("status")
+
+    user.stripe_subscription_id = subscription.get("id")
+    user.subscription_status = status
+    period_end = subscription.get("current_period_end")
+    user.current_period_end = (
+        datetime.fromtimestamp(period_end, tz=timezone.utc) if period_end else None
+    )
+    user.plan = plan if plan and status in ("active", "trialing") else "free"
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def activate_demo_subscription(db: Session, user: User, plan: str) -> User:
+    """`PAYMENT_MODE=demo`'s equivalent of a webhook confirming a Stripe
+    subscription — except there is no Stripe object to sync from, since the
+    "payment" is the simulated card check in `backend/demo_payments.py`
+    passing. `stripe_subscription_id` gets an obviously-fake `demo_...` id
+    (never a real Stripe id shape) purely so it's easy to tell a demo
+    subscription apart from a real one when inspecting the database;
+    `stripe_customer_id` is deliberately left untouched — there is no real
+    Stripe customer behind a demo subscription, so no Billing Portal link
+    should ever be offered for it."""
+    user.plan = plan
+    user.subscription_status = "active"
+    user.stripe_subscription_id = f"demo_{secrets.token_hex(12)}"
+    user.current_period_end = _utcnow() + timedelta(days=30)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def downgrade_to_free(db: Session, user: User) -> User:
+    """A subscription was deleted/canceled outright — the customer id is
+    kept (so a future re-subscribe reuses the same Stripe Customer and its
+    payment history), but the subscription id/plan/period are cleared."""
+    user.plan = "free"
+    user.subscription_status = "canceled"
+    user.stripe_subscription_id = None
+    user.current_period_end = None
     db.commit()
     db.refresh(user)
     return user

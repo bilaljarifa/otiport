@@ -200,6 +200,20 @@ def optimize_target_return(
     return weights, metrics
 
 
+def compute_risk_contributions(weights: np.ndarray, cov: np.ndarray) -> np.ndarray:
+    """Each position's share of total portfolio variance (Euler/marginal
+    contribution — sums to the portfolio's own volatility). Shared by
+    `optimize_risk_parity` below (its objective needs exactly this) and the
+    Risk Center's per-position risk-contribution breakdown
+    (`backend/risk.py`), so both use one formula.
+    """
+    port_vol = portfolio_volatility(weights, cov)
+    if port_vol == 0:
+        return np.zeros_like(weights)
+    marginal_contrib = cov @ weights
+    return weights * marginal_contrib / port_vol
+
+
 def optimize_risk_parity(
     cov: np.ndarray,
     mu: Optional[np.ndarray] = None,
@@ -218,16 +232,9 @@ def optimize_risk_parity(
     """
     n = cov.shape[0]
 
-    def risk_contribution(weights):
-        """Calculate risk contribution of each asset."""
-        port_vol = portfolio_volatility(weights, cov)
-        marginal_contrib = cov @ weights
-        risk_contrib = weights * marginal_contrib / port_vol
-        return risk_contrib
-
     def risk_parity_objective(weights):
         """Objective: minimize squared differences in risk contributions."""
-        rc = risk_contribution(weights)
+        rc = compute_risk_contributions(weights, cov)
         target_rc = 1.0 / n  # Equal risk contribution
         return np.sum((rc - target_rc) ** 2)
 

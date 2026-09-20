@@ -78,3 +78,46 @@ def test_quotes_are_cached_per_ticker(mock_download, client, register_user):
     client.get("/market/quotes?tickers=SPY", headers=headers)
     client.get("/market/quotes?tickers=SPY", headers=headers)
     assert mock_download.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+#  GET /public/market/quotes — the unauthenticated variant powering the
+#  Landing page's market ticker. Always the app's own fixed ETF universe,
+#  never a caller-supplied ticker list.
+# ---------------------------------------------------------------------------
+
+def _public_universe() -> list[str]:
+    from api import _PUBLIC_TICKER_UNIVERSE
+
+    return _PUBLIC_TICKER_UNIVERSE
+
+
+@patch("backend.pricing.yf.download")
+def test_public_quotes_work_without_auth(mock_download, client):
+    universe = _public_universe()
+    mock_download.return_value = _fake_frame(universe)
+    response = client.get("/public/market/quotes")
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body["quotes"].keys()) == set(universe)
+    assert body["missing"] == []
+
+
+@patch("backend.pricing.yf.download")
+def test_public_quotes_ignores_query_params_and_only_serves_known_tickers(mock_download, client):
+    universe = _public_universe()
+    mock_download.return_value = _fake_frame(universe)
+    # No way to request an arbitrary ticker — the endpoint takes no
+    # parameters at all, unlike the authenticated /market/quotes.
+    response = client.get("/public/market/quotes?tickers=NOTAREALTICKER")
+    assert response.status_code == 200
+    assert "NOTAREALTICKER" not in response.json()["quotes"]
+    assert "NOTAREALTICKER" not in response.json()["missing"]
+
+
+@patch("backend.pricing.yf.download")
+def test_public_quotes_never_returns_a_password_hash_or_user_data(mock_download, client):
+    mock_download.return_value = _fake_frame(_public_universe())
+    response = client.get("/public/market/quotes")
+    assert "password" not in response.text.lower()
+    assert "user" not in response.text.lower()

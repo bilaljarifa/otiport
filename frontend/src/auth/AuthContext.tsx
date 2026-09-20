@@ -13,6 +13,12 @@ interface AuthContextValue {
    * is still valid. */
   isLoading: boolean;
   loginWithCredentials: (username: string, password: string) => Promise<void>;
+  /** Google's own redirect lands on `GET /auth/google/callback` (the
+   * backend), which already did the code exchange and hands this page a
+   * ready-made Optiport JWT via the URL fragment — this just adopts it as
+   * the current session (fetching the profile, exactly like restoring a
+   * persisted token on page load does). */
+  completeGoogleRedirect: (token: string) => Promise<void>;
   registerAccount: (
     username: string,
     email: string,
@@ -105,6 +111,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user);
   }
 
+  async function completeGoogleRedirect(token: string) {
+    // Set the module-level token synchronously first — apiRequest reads it
+    // from there, not from React state, so `authApi.me()` right below must
+    // not race the `useEffect` above (which only fires after this render
+    // commits).
+    setAuthToken(token);
+    const profile = await authApi.me();
+    setToken(token);
+    setUser(profile);
+  }
+
   async function registerAccount(
     username: string,
     email: string,
@@ -132,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: Boolean(token && (user || backendUnreachable)),
       isLoading,
       loginWithCredentials,
+      completeGoogleRedirect,
       registerAccount,
       logout,
       updateUser: setUser,

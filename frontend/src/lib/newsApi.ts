@@ -51,3 +51,29 @@ export interface NewsSummary {
 export function getTickerNewsSummary(ticker: string): Promise<NewsSummary> {
   return apiRequest<NewsSummary>(`/news/${encodeURIComponent(ticker)}/summary`);
 }
+
+export interface TickerImpact {
+  ticker: string;
+  news_count: number;
+  weighted_sentiment: number;
+  overall_sentiment: string;
+  overall_market_impact: string;
+  overall_confidence: number;
+}
+
+export interface MarketImpactResponse {
+  tickers: TickerImpact[];
+  overall: NewsSummary;
+  failed_tickers: string[];
+}
+
+/** News impact for a whole ticker universe in one batched call — the same
+ * pipeline/methodology as a single ticker's `/news/{ticker}/summary`,
+ * pooled per ticker. Used by the Markets screener rather than N sequential
+ * per-ticker news fetches. */
+export function getMarketImpact(tickers: string[]): Promise<MarketImpactResponse> {
+  return apiRequest<MarketImpactResponse>("/news/market-impact", {
+    method: "POST",
+    body: { tickers },
+  });
+}

@@ -18,6 +18,13 @@ export function getQuotes(tickers: string[]): Promise<QuotesResponse> {
   return apiRequest<QuotesResponse>(`/market/quotes?tickers=${query}`);
 }
 
+/** Unauthenticated — powers the public Landing page's market ticker only.
+ * Always the app's own fixed ETF universe server-side; takes no
+ * parameters, unlike `getQuotes`. */
+export function getPublicQuotes(): Promise<QuotesResponse> {
+  return apiRequest<QuotesResponse>("/public/market/quotes", { auth: false });
+}
+
 export interface OHLCBar {
   time: string;
   open: number;

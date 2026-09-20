@@ -1,11 +1,11 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/AuthContext";
-import { useTheme } from "../theme/ThemeContext";
 import { settlePortfolio } from "../lib/portfolioApi";
 import { Brand } from "./Brand";
 import { buttonClass } from "./buttonStyles";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV_SECTIONS: { label: string; items: { to: string; label: string }[] }[] = [
   {
@@ -15,6 +15,8 @@ const NAV_SECTIONS: { label: string; items: { to: string; label: string }[] }[] 
       { to: "/app/markets", label: "Markets" },
       { to: "/app/portfolio", label: "Portfolio" },
       { to: "/app/watchlist", label: "Watchlist" },
+      { to: "/app/report", label: "Report" },
+      { to: "/app/billing", label: "Billing" },
     ],
   },
   {
@@ -30,6 +32,8 @@ const NAV_SECTIONS: { label: string; items: { to: string; label: string }[] }[] 
     items: [
       { to: "/app/news", label: "News" },
       { to: "/app/analytics", label: "Analytics" },
+      { to: "/app/risk", label: "Risk Center" },
+      { to: "/app/scenario", label: "Scenario Analysis" },
       { to: "/app/assistant", label: "AI Assistant" },
     ],
   },
@@ -38,8 +42,9 @@ const NAV_SECTIONS: { label: string; items: { to: string; label: string }[] }[] 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
   const queryClient = useQueryClient();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const closeMobileNav = () => setMobileNavOpen(false);
 
   // Open LIMIT orders and active alerts only ever progress when something
   // matches them against a fresh price (see `backend/crud.py::settle`) — the
@@ -71,10 +76,34 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen bg-surface">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface text-ink">
-        <div className="px-4 py-4">
+    <div className="app-shell flex min-h-screen overflow-x-hidden bg-surface">
+      {/* Backdrop — mobile/tablet only, closes the drawer on tap. Sits below
+          the drawer (z-30 vs z-40) and above ordinary page content. */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-ink/40 lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 -translate-x-full flex-col border-r border-line bg-surface text-ink transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-56 lg:translate-x-0 ${
+          mobileNavOpen ? "translate-x-0" : ""
+        }`}
+      >
+        <div className="flex items-center justify-between px-4 py-4">
           <Brand size="sm" />
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            className="rounded p-1 text-ink-muted hover:text-ink lg:hidden"
+            aria-label="Close menu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
         <nav className="flex-1 overflow-y-auto px-2 py-2">
           {NAV_SECTIONS.map((section) => (
@@ -86,6 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  onClick={closeMobileNav}
                   className={({ isActive }) =>
                     `block rounded px-2.5 py-1.5 text-sm font-medium ${
                       isActive
@@ -100,20 +130,29 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           ))}
           {user?.role === "admin" && (
-            <div className="mb-4">
+            <div className="mb-4 border-t border-line-soft pt-3">
               <div className="px-2.5 pb-1.5 text-[11px] font-bold uppercase tracking-widest text-ink-faint">
                 Administration
               </div>
               <NavLink
                 to="/app/admin"
+                onClick={closeMobileNav}
                 className={({ isActive }) =>
-                  `block rounded px-2.5 py-1.5 text-sm font-medium ${
+                  `flex items-center gap-2 rounded px-2.5 py-1.5 text-sm font-medium ${
                     isActive
                       ? "bg-accent-soft text-ink"
                       : "text-ink-muted hover:bg-surface-alt hover:text-ink"
                   }`
                 }
               >
+                <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+                  <path
+                    d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                </svg>
                 Admin
               </NavLink>
             </div>
@@ -122,6 +161,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="border-t border-line px-4 py-3">
           <NavLink
             to="/app/settings"
+            onClick={closeMobileNav}
             className="block truncate text-sm font-semibold text-ink hover:text-accent"
           >
             {/* `user` is briefly/indefinitely null on a restored session the
@@ -134,29 +174,37 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex min-h-screen flex-1 flex-col">
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface/95 px-6 py-3 backdrop-blur">
-          <span className="rounded-full border border-line-strong bg-surface-alt px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-ink-muted">
-            Paper Trading
-          </span>
-          <div className="flex items-center gap-4">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-line bg-surface/95 px-4 py-3 backdrop-blur sm:px-6">
+          <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              onClick={toggleTheme}
-              className="rounded border border-line-strong px-2.5 py-1.5 text-xs font-semibold text-ink-muted hover:border-ink hover:text-ink"
-              aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+              onClick={() => setMobileNavOpen(true)}
+              className="shrink-0 rounded border border-line-strong p-1.5 text-ink-muted hover:border-ink hover:text-ink lg:hidden"
+              aria-label="Open menu"
             >
-              {theme === "light" ? "Dark" : "Light"}
+              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
             </button>
-            <NavLink to="/app/profile" className="text-sm font-medium text-ink-muted hover:text-ink">
+            <span className="hidden shrink-0 rounded-full border border-line-strong bg-surface-alt px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-ink-muted sm:inline">
+              Paper Trading
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            <ThemeToggle />
+            <NavLink
+              to="/app/profile"
+              className="hidden text-sm font-medium text-ink-muted hover:text-ink sm:inline"
+            >
               Profile
             </NavLink>
-            <button onClick={handleLogout} className={buttonClass("secondary", "px-3 py-1.5")}>
+            <button onClick={handleLogout} className={buttonClass("secondary", "px-2.5 py-1.5 text-xs sm:px-3 sm:text-sm")}>
               Log out
             </button>
           </div>
         </header>
-        <main className="flex-1 px-6 py-6">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6">{children}</main>
       </div>
     </div>
   );

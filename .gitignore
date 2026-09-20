@@ -26,7 +26,8 @@ Thumbs.db
 optiport.db*
 *.db-journal
 
-# Secrets éventuels (par sécurité — aucun n'est présent aujourd'hui)
+# Secrets — .env holds real values locally (NEWS_API_KEY, GROQ_API_KEY,
+# GOOGLE_CLIENT_SECRET, AUTH_SECRET_KEY...); never tracked, never committed.
 *.env
 .env
 *.pem

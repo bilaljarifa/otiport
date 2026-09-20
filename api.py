@@ -20,22 +20,42 @@ from backend.forecaster import (
     get_expected_returns,
     get_portfolio_data,
     compute_covariance_matrix,
-    fetch_etf_data
+    fetch_etf_data,
+    DEFAULT_MODEL_DIR,
+    resolve_model_dir,
 )
 from backend.news_service import fetch_news_for_ticker, NewsServiceError
 from backend.news_pipeline import analyze_article, analyze_articles
 from backend.news_aggregator import aggregate as aggregate_news
 from backend.news_features import build_news_features
 from backend.forecast_context import build_forecast_context
-from backend.news_cache import analyzed_news_cache
+from backend.news_cache import analyzed_news_cache, news_analytics_cache
+from backend.news_analytics import build_news_analytics
 from backend.routers import admin as admin_router
+from backend.routers import analytics as analytics_router
 from backend.routers import assistant as assistant_router
 from backend.routers import auth as auth_router
+from backend.routers import billing as billing_router
 from backend.routers import portfolio as portfolio_router
+from backend.routers import risk as risk_router
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     init_db()
+
+    # Plain print, not `logging` — nothing in this app configures a root
+    # logging handler, so a `logging.getLogger(...).info(...)` call here
+    # would be silently dropped and defeat the point of a startup notice.
+    model_dir = resolve_model_dir(DEFAULT_MODEL_DIR)
+    if model_dir.exists():
+        found = len(list(model_dir.glob("*_model.keras")))
+        print(f"[optiport] LSTM models found: {found} ({model_dir})")
+    else:
+        print(
+            f"[optiport] LSTM model directory not found at {model_dir} — "
+            "/forecast will use the historical-return fallback until models are trained."
+        )
+
     yield
 
 
@@ -87,8 +107,11 @@ app.add_middleware(
 
 app.include_router(auth_router.router)
 app.include_router(admin_router.router)
+app.include_router(billing_router.router)
 app.include_router(portfolio_router.router)
 app.include_router(assistant_router.router)
+app.include_router(analytics_router.router)
+app.include_router(risk_router.router)
 
 _AUTH = [Depends(get_current_user)]
 
@@ -273,7 +296,7 @@ def optimize(req: OptimizeRequest):
 class ForecastRequest(BaseModel):
     tickers: List[str] = Field(..., min_length=1, description="List of ETF ticker symbols")
     model_path: Optional[str] = Field(
-        default="trained_models_LSTM_2000_epochs/trained_models_LSTM_2000_epochs",
+        default=DEFAULT_MODEL_DIR,
         description="Path to model directory containing per-ticker LSTM models"
     )
     start_date: str = Field("2010-01-01", description="Start date for historical data")
@@ -338,7 +361,7 @@ class SmartInvestRequest(BaseModel):
         description="List of ETF ticker symbols to consider"
     )
     model_path: Optional[str] = Field(
-        default="trained_models_LSTM_2000_epochs/trained_models_LSTM_2000_epochs",
+        default=DEFAULT_MODEL_DIR,
         description="Path to trained model directory containing per-ticker LSTM models"
     )
     risk_free_rate: float = Field(
@@ -623,7 +646,7 @@ class EfficientFrontierRequest(BaseModel):
         default=["PSI", "IYW", "RING", "PICK", "NLR", "UTES", "LIT", "NANR", "GUNR", "XCEM", "PTLC", "FXU"],
         min_length=2
     )
-    model_path: Optional[str] = Field(default="trained_models_LSTM_2000_epochs/trained_models_LSTM_2000_epochs")
+    model_path: Optional[str] = Field(default=DEFAULT_MODEL_DIR)
     risk_free_rate: float = Field(default=0.05)
     n_points: int = Field(default=50, ge=10, le=100)
 
@@ -812,6 +835,247 @@ def get_ticker_news_summary(ticker: str):
     return NewsSummaryResponse(ticker=ticker.upper(), **summary)
 
 
+# ---- News Impact Analytics ----
+#
+# A wider-window (30 day / 100 article) pass through the SAME pipeline as
+# `/news/{ticker}` above, cached separately so it never disturbs that
+# endpoint's own 2-day, 20-article cache entry. `backend/news_analytics.py`
+# holds all the statistics; this endpoint just fetches, calls it once, and
+# maps the result onto typed models.
+
+def _get_analyzed_news_wide(ticker: str) -> list:
+    ticker = ticker.upper()
+
+    def _load():
+        company_name = ETF_METADATA.get(ticker, {}).get("name")
+        query_name = f"{company_name} ETF" if company_name else None
+        try:
+            raw_articles = fetch_news_for_ticker(
+                ticker, company_name=query_name, page_size=100, lookback_days=30,
+            )
+        except NewsServiceError as exc:
+            raise _news_error_to_http(exc)
+        analyzed = analyze_articles(raw_articles)
+        analyzed.sort(key=lambda a: a.get("publishedAt") or "", reverse=True)
+        return analyzed
+
+    cached = news_analytics_cache.get(ticker)
+    if cached is not None:
+        return cached
+    result = _load()
+    news_analytics_cache.set(ticker, result)
+    return result
+
+
+class NewsOverviewModel(BaseModel):
+    status: Literal["ok", "empty"]
+    articles_analyzed: int
+    positive_pct: Optional[float]
+    neutral_pct: Optional[float]
+    negative_pct: Optional[float]
+    average_sentiment_score: Optional[float]
+    aggregate_impact_score: Optional[float]
+    overall_sentiment: str
+    overall_market_impact: str
+
+
+class SentimentBucketModel(BaseModel):
+    label: Literal["POSITIVE", "NEUTRAL", "NEGATIVE"]
+    count: int
+    pct: float
+    average_score: Optional[float]
+
+
+class SentimentDistributionModel(BaseModel):
+    status: Literal["ok", "empty"]
+    total: int
+    distribution: List[SentimentBucketModel]
+
+
+class TrendPointModel(BaseModel):
+    bucket: str
+    article_count: int
+    average_sentiment: float
+
+
+class TrendRangeModel(BaseModel):
+    range: Literal["24H", "3D", "7D", "30D"]
+    available: bool
+    reason: Optional[str] = None
+    article_count: Optional[int] = None
+    points: List[TrendPointModel] = []
+
+
+class SentimentTrendModel(BaseModel):
+    status: Literal["ok", "insufficient_data"]
+    reason: Optional[str] = None
+    data_span_hours: Optional[float] = None
+    ranges: List[TrendRangeModel] = []
+
+
+class VolumeDailyPointModel(BaseModel):
+    date: str
+    count: int
+
+
+class VolumeAnalysisModel(BaseModel):
+    status: Literal["ok", "insufficient_data"]
+    reason: Optional[str] = None
+    daily_series: List[VolumeDailyPointModel] = []
+    data_span_days: Optional[float] = None
+    current_period_days: Optional[int] = None
+    current_period_count: Optional[int] = None
+    previous_period_available: bool = False
+    previous_period_count: Optional[int] = None
+    pct_change: Optional[float] = None
+    insufficient_history_reason: Optional[str] = None
+
+
+class MarketImpactBreakdownModel(BaseModel):
+    status: Literal["ok", "empty"]
+    aggregate_score: Optional[float] = None
+    scale_min: Optional[float] = None
+    scale_max: Optional[float] = None
+    overall_sentiment: Optional[str] = None
+    overall_market_impact: Optional[str] = None
+    positive_contribution: Optional[float] = None
+    negative_contribution: Optional[float] = None
+    average_recency_weight: Optional[float] = None
+    average_article_impact_score: Optional[float] = None
+    articles_considered: Optional[int] = None
+
+
+class TopNewsItemModel(BaseModel):
+    title: str
+    source: str
+    url: Optional[str]
+    publishedAt: Optional[str]
+    sentiment: SentimentModel
+    marketImpact: MarketImpactModel
+    impact_score: float
+    recency_weight: float
+
+
+class TopNewsModel(BaseModel):
+    status: Literal["ok", "empty"]
+    items: List[TopNewsItemModel] = []
+
+
+class PriceObservationModel(BaseModel):
+    date: str
+    sentiment: float
+    article_count: int
+    daily_return_pct: float
+
+
+class NewsVsPriceModel(BaseModel):
+    status: Literal["ok", "insufficient_data"]
+    reason: Optional[str] = None
+    methodology: Optional[str] = None
+    observation_count: Optional[int] = None
+    correlation_coefficient: Optional[float] = None
+    observations: List[PriceObservationModel] = []
+
+
+class ImpactHistoryPointModel(BaseModel):
+    date: str
+    article_count: int
+    aggregate_impact_score: float
+    overall_market_impact: str
+
+
+class ImpactHistoryModel(BaseModel):
+    status: Literal["ok", "insufficient_data"]
+    reason: Optional[str] = None
+    points: List[ImpactHistoryPointModel] = []
+
+
+class NewsAnalyticsResponse(BaseModel):
+    ticker: str
+    overview: NewsOverviewModel
+    sentiment_distribution: SentimentDistributionModel
+    sentiment_trend: SentimentTrendModel
+    volume_analysis: VolumeAnalysisModel
+    market_impact: MarketImpactBreakdownModel
+    top_news: TopNewsModel
+    news_vs_price: NewsVsPriceModel
+    impact_history: ImpactHistoryModel
+
+
+@app.get("/news/{ticker}/analytics", response_model=NewsAnalyticsResponse, dependencies=_AUTH)
+def get_ticker_news_analytics(ticker: str):
+    """Quantitative news-impact statistics for `ticker`: KPI overview,
+    sentiment distribution/trend, volume analysis, the existing market
+    impact score decomposed into its contributions, top impactful articles,
+    an observed (non-causal) news-vs-price association, and a per-day
+    impact history. One wide-window (30-day) pass through the existing
+    pipeline — no second scoring system, no fabricated statistics."""
+    analyzed = _get_analyzed_news_wide(ticker)
+
+    try:
+        price_bars = pricing.get_ohlc(ticker.upper(), period="1mo")
+    except Exception:
+        price_bars = []
+
+    data = build_news_analytics(ticker.upper(), analyzed, price_bars)
+
+    return NewsAnalyticsResponse(
+        ticker=data["ticker"],
+        overview=NewsOverviewModel(**data["overview"]),
+        sentiment_distribution=SentimentDistributionModel(
+            status=data["sentiment_distribution"]["status"],
+            total=data["sentiment_distribution"]["total"],
+            distribution=[
+                SentimentBucketModel(**b) for b in data["sentiment_distribution"]["distribution"]
+            ],
+        ),
+        sentiment_trend=SentimentTrendModel(
+            status=data["sentiment_trend"]["status"],
+            reason=data["sentiment_trend"].get("reason"),
+            data_span_hours=data["sentiment_trend"].get("data_span_hours"),
+            ranges=[TrendRangeModel(**r) for r in data["sentiment_trend"].get("ranges", [])],
+        ),
+        volume_analysis=VolumeAnalysisModel(
+            **{
+                **data["volume_analysis"],
+                "daily_series": [
+                    VolumeDailyPointModel(**p) for p in data["volume_analysis"].get("daily_series", [])
+                ],
+            }
+        ),
+        market_impact=MarketImpactBreakdownModel(**data["market_impact"]),
+        top_news=TopNewsModel(
+            status=data["top_news"]["status"],
+            items=[
+                TopNewsItemModel(
+                    title=item["title"], source=item["source"], url=item["url"],
+                    publishedAt=item["publishedAt"],
+                    sentiment=SentimentModel(**item["sentiment"]),
+                    marketImpact=MarketImpactModel(**item["market_impact"]),
+                    impact_score=item["impact_score"],
+                    recency_weight=item["recency_weight"],
+                )
+                for item in data["top_news"].get("items", [])
+            ],
+        ),
+        news_vs_price=NewsVsPriceModel(
+            status=data["news_vs_price"]["status"],
+            reason=data["news_vs_price"].get("reason"),
+            methodology=data["news_vs_price"].get("methodology"),
+            observation_count=data["news_vs_price"].get("observation_count"),
+            correlation_coefficient=data["news_vs_price"].get("correlation_coefficient"),
+            observations=[
+                PriceObservationModel(**o) for o in data["news_vs_price"].get("observations", [])
+            ],
+        ),
+        impact_history=ImpactHistoryModel(
+            status=data["impact_history"]["status"],
+            reason=data["impact_history"].get("reason"),
+            points=[ImpactHistoryPointModel(**p) for p in data["impact_history"].get("points", [])],
+        ),
+    )
+
+
 class MarketImpactRequest(BaseModel):
     tickers: List[str] = Field(..., min_length=1)
 
@@ -873,7 +1137,7 @@ def get_market_impact(req: MarketImpactRequest):
 class ForecastContextRequest(BaseModel):
     ticker: str
     model_path: Optional[str] = Field(
-        default="trained_models_LSTM_2000_epochs/trained_models_LSTM_2000_epochs",
+        default=DEFAULT_MODEL_DIR,
     )
     current_price: Optional[float] = Field(
         default=None, description="Pass the UI's already-known quote to avoid a second fetch."
@@ -965,6 +1229,31 @@ def market_quotes(tickers: str):
     raw = pricing.get_quotes(requested)
     quotes = {t: QuoteModel(ticker=t, **raw[t]) for t in requested if t in raw}
     missing = [t for t in requested if t not in raw]
+    return QuotesResponse(quotes=quotes, missing=missing)
+
+
+#  SPY/QQQ aren't in ETF_METADATA (that dict is the 12 sector ETFs only),
+#  but the frontend's own `catalog.ts::ETF_UNIVERSE` already treats both as
+#  part of the app's broader ETF universe (shown on Markets/Trading) — this
+#  mirrors that same fixed 14-ticker set for the public ticker below.
+_PUBLIC_TICKER_UNIVERSE = ["SPY", "QQQ", *ETF_METADATA.keys()]
+
+
+@app.get("/public/market/quotes", response_model=QuotesResponse)
+def public_market_quotes():
+    """Unauthenticated — for the public Landing page's market ticker only.
+
+    Deliberately not `GET /market/quotes` with `_AUTH` dropped: this always
+    serves the app's own fixed ticker universe, never an arbitrary
+    caller-supplied list, so it can't be used as an open proxy for
+    unrelated Yahoo Finance lookups. The data itself (price, day change) is
+    already public market information and carries no user or account
+    context — same cached `pricing.get_quotes()` the authenticated
+    endpoint above uses, not a separate code path.
+    """
+    raw = pricing.get_quotes(_PUBLIC_TICKER_UNIVERSE)
+    quotes = {t: QuoteModel(ticker=t, **raw[t]) for t in _PUBLIC_TICKER_UNIVERSE if t in raw}
+    missing = [t for t in _PUBLIC_TICKER_UNIVERSE if t not in raw]
     return QuotesResponse(quotes=quotes, missing=missing)
 
 

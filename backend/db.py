@@ -28,12 +28,27 @@ engine = create_engine(_URL, connect_args=_connect_args)
 
 
 @event.listens_for(Engine, "connect")
-def _enable_sqlite_fk(dbapi_connection, _connection_record) -> None:
-    """SQLite ignores foreign keys (and therefore ON DELETE CASCADE) unless
-    this pragma is set per-connection."""
+def _configure_sqlite(dbapi_connection, _connection_record) -> None:
+    """Per-connection SQLite pragmas.
+
+    - `foreign_keys=ON`: SQLite ignores foreign keys (and therefore ON DELETE
+      CASCADE) unless this is set per-connection.
+    - `journal_mode=WAL`: the default rollback-journal mode locks the whole
+      database file for the duration of any write, so one user placing an
+      order blocks every other request reading the database at the same
+      moment ("database is locked" errors under real concurrent traffic).
+      WAL lets readers keep going while a write is in progress — the change
+      that actually matters once this app has more than one simultaneous
+      user, which a paper-trading app running in production will.
+    - `synchronous=NORMAL`: the standard pairing with WAL — still fsyncs at
+      transaction commit, just not on every page write; safe with WAL's
+      write-ahead log and meaningfully faster under concurrent writes.
+    """
     if _URL.startswith("sqlite"):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.close()
 
 
@@ -59,6 +74,22 @@ def _migrate_added_columns() -> None:
             conn.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_sub ON users (google_sub)"
             ))
+    if "plan" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN plan VARCHAR(16) NOT NULL DEFAULT 'free'"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(64)"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN stripe_subscription_id VARCHAR(64)"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN subscription_status VARCHAR(32)"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN current_period_end DATETIME"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_stripe_customer_id "
+                "ON users (stripe_customer_id)"
+            ))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_stripe_subscription_id "
+                "ON users (stripe_subscription_id)"
+            ))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_plan ON users (plan)"))
 
 
 def init_db() -> None:

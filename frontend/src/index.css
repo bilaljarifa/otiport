@@ -43,6 +43,17 @@
   --color-accent-strong: #2563eb;
   --color-accent-strong-hover: #1d4ed8;
 
+  /*
+   * Same reasoning as --color-accent-strong above, for a different fill:
+   * a "selected" chip (segmented control) needs a background that reads as
+   * dark/near-black with white text on top, in *both* themes. `--color-ink`
+   * can't be used for this — it's the body-text token, so it deliberately
+   * flips to a light color in dark mode to stay legible, which would turn
+   * a `bg-ink` chip into a bright white block against a dark UI instead of
+   * a dark one. Theme-invariant on purpose.
+   */
+  --color-ink-strong: #0f1115;
+
   --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
 }
@@ -118,10 +129,149 @@ body {
   color: var(--color-ink);
 }
 
+/*
+ * The authentication pages (Login, Register, Google callback) are always
+ * the premium dark brand experience, regardless of the authenticated app's
+ * theme preference — the mirror image of `.theme-light-forced` above, same
+ * reasoning: an ancestor `data-theme` must never leak in on a page that
+ * commits to one specific look. Values copied verbatim from
+ * `:root[data-theme="dark"]` so every existing component/utility class
+ * (buttons, inputs, StatTile, etc.) renders correctly with zero changes.
+ */
+.theme-dark-forced {
+  color-scheme: dark;
+  --color-ink: #f4f7fb;
+  --color-ink-muted: #aab6c5;
+  --color-ink-faint: #7f8b9a;
+  --color-surface: #10151c;
+  --color-surface-alt: #171e27;
+  --color-surface-soft: #202936;
+  --color-line: #2b3542;
+  --color-line-strong: #455364;
+  --color-line-soft: #1c242e;
+  --color-accent-soft: #172f52;
+  --color-accent: #5b9cff;
+  --color-accent-hover: #83b5ff;
+  --color-up-soft: #123522;
+  --color-down-soft: #421d23;
+  --app-bg: #10151c;
+  --chart-grid: #26303b;
+  --chart-text: #aab6c5;
+  background: var(--app-bg);
+  color: var(--color-ink);
+}
+
 button, input, select, textarea {
   font: inherit;
 }
 
 ::selection {
   background: var(--color-accent-soft);
+}
+
+/*
+ * Scroll-reveal + hero entrance, used only on the public marketing pages.
+ * `.reveal` starts faded/offset and settles into place once `.is-visible`
+ * is added (by `useScrollReveal`, an IntersectionObserver hook) or on
+ * mount for above-the-fold content. Motion is opt-in: with no preference
+ * expressed, content still renders immediately (`opacity/transform` are
+ * the *only* thing animating, never layout), and users who ask for reduced
+ * motion get the transition removed entirely rather than just shortened.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+  .reveal-stagger > * {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .reveal-stagger.is-visible > * {
+    opacity: 1;
+    transform: none;
+  }
+  .reveal-stagger.is-visible > *:nth-child(1) { transition-delay: 0ms; }
+  .reveal-stagger.is-visible > *:nth-child(2) { transition-delay: 80ms; }
+  .reveal-stagger.is-visible > *:nth-child(3) { transition-delay: 160ms; }
+  .reveal-stagger.is-visible > *:nth-child(4) { transition-delay: 240ms; }
+  .reveal-stagger.is-visible > *:nth-child(5) { transition-delay: 320ms; }
+  .reveal-stagger.is-visible > *:nth-child(6) { transition-delay: 400ms; }
+
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: none; }
+  }
+  .hero-enter {
+    animation: fade-in-up 0.7s ease both;
+  }
+  .hero-enter-delay-1 { animation-delay: 0.1s; }
+  .hero-enter-delay-2 { animation-delay: 0.2s; }
+  .hero-enter-delay-3 { animation-delay: 0.32s; }
+
+  .lift-on-hover {
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  }
+  .lift-on-hover:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px -16px rgb(0 0 0 / 0.18);
+  }
+
+  /* Ticker tape: the track holds the item list twice back-to-back, then
+     scrolls exactly half its own width — a seamless loop with no JS and no
+     jump-cut. Paused whenever the tab isn't visible or reduced motion is
+     off, so it never fights for CPU/battery in a background tab. */
+  .ticker-track {
+    animation: ticker-scroll 32s linear infinite;
+  }
+  .ticker-track:hover {
+    animation-play-state: paused;
+  }
+  @keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+
+  /* Small "is this live" status dot on the auth pages' market preview. */
+  @keyframes status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  .status-pulse {
+    animation: status-pulse 2s ease-in-out infinite;
+  }
+}
+
+/* Outside the no-preference block on purpose: reduced-motion users still
+   see every ticker item (just statically, via flex-wrap instead of a
+   scrolling track) rather than losing the data entirely. */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    flex-wrap: wrap;
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+/* Printing any authenticated page (chiefly the Portfolio Report) hides the
+   app chrome — sidebar, top bar — so only the page content prints/exports
+   to PDF via the browser's own print dialog. No PDF library involved. */
+@media print {
+  .app-shell aside,
+  .app-shell > div > header {
+    display: none !important;
+  }
+  .app-shell,
+  .app-shell main {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
 }

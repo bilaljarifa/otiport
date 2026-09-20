@@ -27,6 +27,7 @@ from backend.news_cache import analyzed_news_cache
 from backend.news_pipeline import analyze_articles
 from backend.news_service import NewsServiceError, fetch_news_for_ticker
 from backend.optimizer import optimize_portfolio
+from backend.risk import RiskAnalysisError, compute_portfolio_risk
 
 DEFAULT_TICKERS: list[str] = list(ETF_METADATA.keys())
 
@@ -118,6 +119,32 @@ def get_return_forecast(tickers: list[str] | None = None) -> dict[str, Any]:
         }
         for ticker, pred in predictions.items()
     }
+
+
+def get_portfolio_risk(db: Session, user: User, benchmark_ticker: str = "SPY") -> dict[str, Any]:
+    """Real risk profile of the caller's current holdings — the exact same
+    `compute_portfolio_risk` engine behind `GET /risk/portfolio`, not a
+    second calculation. Returns a `status: "empty"` shape (never an error)
+    when the account holds no positions."""
+    account = user.account
+    positions = crud.list_positions(db, account.id)
+    tickers = [p.ticker for p in positions]
+
+    dollar_values: list[float] = []
+    if tickers:
+        prices = pricing.get_last_prices(tickers)
+        for p in positions:
+            price = prices.get(p.ticker, p.avg_price)
+            dollar_values.append(p.quantity * price)
+
+    try:
+        return compute_portfolio_risk(
+            tickers=tickers, dollar_values=dollar_values, cash=account.cash,
+            benchmark_ticker=benchmark_ticker.upper() if benchmark_ticker else None,
+            risk_free_rate=0.0,
+        )
+    except RiskAnalysisError as exc:
+        return {"error": str(exc)}
 
 
 def get_portfolio_optimization(

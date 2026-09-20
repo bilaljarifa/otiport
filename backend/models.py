@@ -58,6 +58,24 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # Subscription — Stripe is authoritative for all of this (see
+    # backend/routers/billing.py's webhook handler); these columns are a
+    # cache of Stripe's own state so every other request can read the
+    # user's plan without calling the Stripe API. "free" needs no Stripe
+    # objects at all, so a brand-new user has every column below at its
+    # default/NULL until they start a checkout for the first time.
+    plan: Mapped[str] = mapped_column(String(16), nullable=False, default="free", index=True)
+    stripe_customer_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, nullable=True, index=True
+    )
+    stripe_subscription_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, nullable=True, index=True
+    )
+    # Stripe's own subscription status string (active/trialing/past_due/
+    # canceled/unpaid/incomplete/incomplete_expired) — never invented here.
+    subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

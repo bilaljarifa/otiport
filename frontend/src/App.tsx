@@ -5,6 +5,12 @@ import { AppShell } from "./components/AppShell";
 import { LandingPage } from "./pages/Landing";
 import { LoginPage } from "./pages/Login";
 import { RegisterPage } from "./pages/Register";
+import { GoogleCallbackPage } from "./pages/GoogleCallback";
+import { PricingPage } from "./pages/Pricing";
+import { BillingPage } from "./pages/Billing";
+import { BillingSuccessPage } from "./pages/BillingSuccess";
+import { BillingCancelPage } from "./pages/BillingCancel";
+import { DemoCheckoutPage } from "./pages/DemoCheckout";
 import { DashboardPage } from "./pages/Dashboard";
 import { MarketsPage } from "./pages/Markets";
 import { PortfolioPage } from "./pages/Portfolio";
@@ -17,6 +23,10 @@ import { SettingsPage } from "./pages/Settings";
 import { AdminPage } from "./pages/Admin";
 import { NewsPage } from "./pages/News";
 import { AnalyticsPage } from "./pages/Analytics";
+import { RiskCenterPage } from "./pages/RiskCenter";
+import { EtfResearchPage } from "./pages/EtfResearch";
+import { PortfolioReportPage } from "./pages/PortfolioReport";
+import { ScenarioAnalysisPage } from "./pages/ScenarioAnalysis";
 import { AiAssistantPage } from "./pages/AiAssistant";
 
 function HomeRoute() {
@@ -33,6 +43,32 @@ export default function App() {
       <Route path="/" element={<HomeRoute />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
+      <Route path="/pricing" element={<PricingPage />} />
+      <Route
+        path="/checkout/demo"
+        element={
+          <ProtectedRoute>
+            <DemoCheckoutPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing/success"
+        element={
+          <ProtectedRoute>
+            <BillingSuccessPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/billing/cancel"
+        element={
+          <ProtectedRoute>
+            <BillingCancelPage />
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         path="/app/dashboard"
@@ -126,6 +162,16 @@ export default function App() {
         }
       />
       <Route
+        path="/app/billing"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <BillingPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/app/admin"
         element={
           <ProtectedRoute>
@@ -151,6 +197,46 @@ export default function App() {
           <ProtectedRoute>
             <AppShell>
               <AnalyticsPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/risk"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <RiskCenterPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/research/:ticker"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <EtfResearchPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/report"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <PortfolioReportPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/scenario"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <ScenarioAnalysisPage />
             </AppShell>
           </ProtectedRoute>
         }

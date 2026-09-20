@@ -15,6 +15,9 @@ dist-ssr
 # Local env overrides — .env.example documents the variables, never commit values
 .env
 
+# Scratch Chrome profile used for manual OAuth testing — never part of the app
+.chrome-profile-*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

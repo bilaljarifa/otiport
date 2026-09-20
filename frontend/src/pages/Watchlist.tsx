@@ -1,10 +1,13 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useWatchlist, useQuotes, watchlistKey } from "../lib/queries";
-import { addToWatchlist, removeFromWatchlist } from "../lib/portfolioApi";
+import { useWatchlist, useQuotes, useAlerts, watchlistKey, alertsKey } from "../lib/queries";
+import { addToWatchlist, removeFromWatchlist, addAlert, removeAlert, resetAlert } from "../lib/portfolioApi";
+import type { AlertDirection } from "../lib/portfolioApi";
 import { money, signedMoney, signedPercent } from "../lib/format";
+import { Link } from "react-router-dom";
 import { QueryState } from "../components/QueryState";
 import { Button } from "../components/Button";
+import { Badge } from "../components/Badge";
 import { ApiError } from "../lib/apiClient";
 
 const TICKER_PATTERN = /^[A-Z]{1,6}$/;
@@ -83,8 +86,8 @@ export function WatchlistPage() {
         isEmpty={tickers.length === 0}
         emptyMessage="No instruments on your watchlist yet. Add a ticker above to start tracking it."
       >
-        <div className="rounded-md border border-line">
-          <table className="w-full text-sm">
+        <div className="rounded-md border border-line overflow-x-auto">
+          <table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
                 <th className="px-4 py-2 font-semibold">Ticker</th>
@@ -121,15 +124,29 @@ export function WatchlistPage() {
                       </td>
                     )}
                     <td className="px-4 py-2.5 text-right font-sans">
-                      <button
-                        onClick={() => removeMutation.mutate(ticker)}
-                        disabled={removeMutation.isPending && removeMutation.variables === ticker}
-                        className="text-xs font-semibold text-ink-muted hover:text-down disabled:opacity-50"
-                      >
-                        {removeMutation.isPending && removeMutation.variables === ticker
-                          ? "Removing…"
-                          : "Remove"}
-                      </button>
+                      <div className="flex items-center justify-end gap-3">
+                        <Link
+                          to={`/app/research/${encodeURIComponent(ticker)}`}
+                          className="text-xs font-semibold text-ink-muted hover:text-ink"
+                        >
+                          Research
+                        </Link>
+                        <Link
+                          to={`/app/trading?ticker=${encodeURIComponent(ticker)}`}
+                          className="text-xs font-semibold text-ink-muted hover:text-ink"
+                        >
+                          Trade
+                        </Link>
+                        <button
+                          onClick={() => removeMutation.mutate(ticker)}
+                          disabled={removeMutation.isPending && removeMutation.variables === ticker}
+                          className="text-xs font-semibold text-ink-muted hover:text-down disabled:opacity-50"
+                        >
+                          {removeMutation.isPending && removeMutation.variables === ticker
+                            ? "Removing…"
+                            : "Remove"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -138,6 +155,153 @@ export function WatchlistPage() {
           </table>
         </div>
       </QueryState>
+
+      <AlertsSection />
     </div>
+  );
+}
+
+function AlertsSection() {
+  const alerts = useAlerts();
+  const queryClient = useQueryClient();
+  const [ticker, setTicker] = useState("");
+  const [direction, setDirection] = useState<AlertDirection>("above");
+  const [threshold, setThreshold] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function invalidate() {
+    void queryClient.invalidateQueries({ queryKey: alertsKey });
+  }
+
+  const addMutation = useMutation({
+    mutationFn: addAlert,
+    onSuccess: () => {
+      setTicker("");
+      setThreshold("");
+      invalidate();
+    },
+    onError: (err) => {
+      setFormError(err instanceof ApiError ? (err.detail ?? err.message) : "Could not create alert.");
+    },
+  });
+  const removeMutation = useMutation({ mutationFn: removeAlert, onSuccess: invalidate });
+  const resetMutation = useMutation({ mutationFn: resetAlert, onSuccess: invalidate });
+
+  function handleAdd(event: FormEvent) {
+    event.preventDefault();
+    setFormError(null);
+    const t = ticker.trim().toUpperCase();
+    const th = Number(threshold);
+    if (!TICKER_PATTERN.test(t)) {
+      setFormError("Enter a valid ticker symbol (1-6 letters, e.g. SPY).");
+      return;
+    }
+    if (!Number.isFinite(th) || th <= 0) {
+      setFormError("Enter a positive price threshold.");
+      return;
+    }
+    addMutation.mutate({ ticker: t, direction, threshold: th });
+  }
+
+  const items = alerts.data ?? [];
+
+  return (
+    <section className="rounded-md border border-line">
+      <div className="border-b border-line px-4 py-2.5 text-sm font-bold text-ink">Price Alerts</div>
+      <div className="p-4">
+        <form onSubmit={handleAdd} className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+            Ticker
+            <input
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value)}
+              placeholder="e.g. SPY"
+              className="w-28 rounded border border-line-strong bg-surface px-3 py-2 text-sm font-mono uppercase text-ink outline-none focus:border-ink focus:ring-1 focus:ring-ink/10"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+            Condition
+            <select
+              value={direction}
+              onChange={(e) => setDirection(e.target.value as AlertDirection)}
+              className="rounded border border-line-strong bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-ink focus:ring-1 focus:ring-ink/10"
+            >
+              <option value="above">Price rises above</option>
+              <option value="below">Price falls below</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+            Threshold ($)
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={threshold}
+              onChange={(e) => setThreshold(e.target.value)}
+              className="w-32 rounded border border-line-strong bg-surface px-3 py-2 text-sm font-mono text-ink outline-none focus:border-ink focus:ring-1 focus:ring-ink/10"
+            />
+          </label>
+          <Button type="submit" disabled={addMutation.isPending}>
+            {addMutation.isPending ? "Adding…" : "Add alert"}
+          </Button>
+        </form>
+        {formError && <p className="mt-2 text-xs text-down">{formError}</p>}
+        <p className="mt-2 text-xs text-ink-faint">
+          Checked against live prices roughly once a minute while the app is open — not a push or
+          email notification.
+        </p>
+      </div>
+
+      <QueryState
+        isLoading={alerts.isLoading}
+        isError={alerts.isError}
+        error={alerts.error}
+        onRetry={() => void alerts.refetch()}
+        isEmpty={items.length === 0}
+        emptyMessage="No price alerts yet."
+      >
+        <div className="divide-y divide-line-soft border-t border-line">
+          {items.map((a) => (
+            <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm font-semibold text-ink">{a.ticker}</span>
+                  <span className="text-sm text-ink-muted">
+                    {a.direction === "above" ? "above" : "below"} {money(a.threshold, 2)}
+                  </span>
+                  <Badge tone={a.status === "TRIGGERED" ? "bg-up-soft text-up" : "bg-accent-soft text-ink"}>
+                    {a.status}
+                  </Badge>
+                </div>
+                {a.status === "TRIGGERED" && a.triggered_at && (
+                  <p className="mt-1 text-xs text-ink-faint">
+                    Triggered {new Date(a.triggered_at).toLocaleString()}
+                    {a.triggered_price != null && ` at ${money(a.triggered_price, 2)}`}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                {a.status === "TRIGGERED" && (
+                  <button
+                    onClick={() => resetMutation.mutate(a.id)}
+                    disabled={resetMutation.isPending}
+                    className="text-xs font-semibold text-ink-muted hover:text-ink"
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  onClick={() => removeMutation.mutate(a.id)}
+                  disabled={removeMutation.isPending}
+                  className="text-xs font-semibold text-ink-muted hover:text-down"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </QueryState>
+    </section>
   );
 }

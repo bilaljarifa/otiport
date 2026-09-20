@@ -12,12 +12,15 @@ here trusts a client-supplied price.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend import crud
+from backend import crud, pricing
 from backend.db import get_db
 from backend.deps import get_current_user
 from backend.models import User
+from backend.performance_attribution import compute_attribution
+from backend.portfolio_history import compute_account_equity_curve
 from backend.schemas import (
     AccountOut,
     AddAlertRequest,
@@ -31,6 +34,12 @@ from backend.schemas import (
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"], dependencies=[Depends(get_current_user)])
+
+
+class EquityCurveResponse(BaseModel):
+    dates: list[str]
+    equity: list[float]
+    note: str | None = None
 
 
 @router.get("/summary", response_model=PortfolioSummaryOut)
@@ -92,6 +101,86 @@ def get_transactions(
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ) -> list[TransactionOut]:
     return [TransactionOut.model_validate(t) for t in crud.list_transactions(db, user.account.id)]
+
+
+@router.get("/equity-curve", response_model=EquityCurveResponse)
+def get_equity_curve(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+) -> EquityCurveResponse:
+    """Real historical account value since this account's first deposit,
+    reconstructed from its own transaction ledger — see
+    `backend/portfolio_history.py`. The full history is returned in one call;
+    the frontend slices it into 1D/1W/1M/... ranges locally rather than
+    re-fetching per range."""
+    transactions = crud.list_transactions(db, user.account.id)
+    tx_dicts = [
+        {"type": t.type, "ticker": t.ticker, "quantity": t.quantity, "amount": t.amount, "created_at": t.created_at}
+        for t in sorted(transactions, key=lambda t: t.created_at)
+    ]
+    positions = {p.ticker: p.quantity for p in crud.list_positions(db, user.account.id)}
+    try:
+        result = compute_account_equity_curve(tx_dicts, positions)
+    except Exception as exc:  # noqa: BLE001 - always answer with a proper response
+        raise HTTPException(status_code=500, detail=f"Equity curve error: {exc}")
+    return EquityCurveResponse(**result)
+
+
+class HoldingContribution(BaseModel):
+    ticker: str
+    contribution: float
+    contribution_pct: float | None = None
+    market_value: float
+    is_open_position: bool
+
+
+class RegionContribution(BaseModel):
+    region: str
+    contribution: float
+
+
+class AttributionMethodology(BaseModel):
+    method: str
+    description: str
+    period: str
+    contribution_pct_minimum_total_return: float
+
+
+class AttributionResponse(BaseModel):
+    status: str
+    detail: str | None = None
+    total_return: float | None = None
+    holdings: list[HoldingContribution] = []
+    region_contributions: list[RegionContribution] = []
+    largest_contributor: HoldingContribution | None = None
+    largest_detractor: HoldingContribution | None = None
+    methodology: AttributionMethodology | None = None
+
+
+@router.get("/attribution", response_model=AttributionResponse)
+def get_attribution(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+) -> AttributionResponse:
+    """Which of the caller's own real holdings contributed to their real
+    portfolio return, since account inception — built from the same
+    transaction ledger and live prices as everything else (see
+    `backend/performance_attribution.py`), never a second accounting model."""
+    account_id = user.account.id
+    transactions = [
+        {"type": t.type, "ticker": t.ticker, "amount": t.amount}
+        for t in crud.list_transactions(db, account_id)
+    ]
+    positions = crud.list_positions(db, account_id)
+    tickers = [p.ticker for p in positions]
+    prices = pricing.get_last_prices(tickers) if tickers else {}
+    current_market_values = {
+        p.ticker: p.quantity * prices[p.ticker] for p in positions if p.ticker in prices
+    }
+
+    try:
+        result = compute_attribution(transactions, current_market_values)
+    except Exception as exc:  # noqa: BLE001 - always answer with a proper response
+        raise HTTPException(status_code=500, detail=f"Performance attribution error: {exc}")
+    return AttributionResponse(**result)
 
 
 @router.get("/watchlist", response_model=WatchlistOut)

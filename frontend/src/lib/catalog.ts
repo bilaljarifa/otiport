@@ -7,23 +7,27 @@
 export interface EtfMeta {
   ticker: string;
   name: string;
+  region: string;
+  /** Has a trained LSTM model (the 12 sector ETFs) vs. a broad-market
+   * benchmark (SPY/QQQ) shown for context but never forecast. */
+  hasModel: boolean;
 }
 
 export const ETF_UNIVERSE: EtfMeta[] = [
-  { ticker: "SPY", name: "S&P 500" },
-  { ticker: "QQQ", name: "Nasdaq 100" },
-  { ticker: "PSI", name: "Semiconductors" },
-  { ticker: "IYW", name: "US Technology" },
-  { ticker: "RING", name: "Gold Miners" },
-  { ticker: "PICK", name: "Metals & Mining" },
-  { ticker: "NLR", name: "Nuclear Energy" },
-  { ticker: "UTES", name: "Utilities" },
-  { ticker: "LIT", name: "Lithium & Battery" },
-  { ticker: "NANR", name: "Natural Resources" },
-  { ticker: "GUNR", name: "Global Resources" },
-  { ticker: "XCEM", name: "Emerging Markets" },
-  { ticker: "PTLC", name: "Large Cap" },
-  { ticker: "FXU", name: "Utilities Alpha" },
+  { ticker: "SPY", name: "S&P 500", region: "Broad Market", hasModel: false },
+  { ticker: "QQQ", name: "Nasdaq 100", region: "Broad Market", hasModel: false },
+  { ticker: "PSI", name: "Semiconductors", region: "North America", hasModel: true },
+  { ticker: "IYW", name: "US Technology", region: "North America", hasModel: true },
+  { ticker: "RING", name: "Gold Miners", region: "Developed Markets", hasModel: true },
+  { ticker: "PICK", name: "Metals & Mining", region: "Developed Markets", hasModel: true },
+  { ticker: "NLR", name: "Nuclear Energy", region: "Developed Markets", hasModel: true },
+  { ticker: "UTES", name: "Utilities", region: "North America", hasModel: true },
+  { ticker: "LIT", name: "Lithium & Battery", region: "Developed Markets", hasModel: true },
+  { ticker: "NANR", name: "Natural Resources", region: "North America", hasModel: true },
+  { ticker: "GUNR", name: "Global Resources", region: "Developed Markets", hasModel: true },
+  { ticker: "XCEM", name: "Emerging Markets", region: "Emerging Markets", hasModel: true },
+  { ticker: "PTLC", name: "Large Cap", region: "North America", hasModel: true },
+  { ticker: "FXU", name: "Utilities Alpha", region: "North America", hasModel: true },
 ];
 
 export const TICKER_PATTERN = /^[A-Z]{1,6}$/;

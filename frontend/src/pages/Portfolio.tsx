@@ -1,10 +1,167 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { usePortfolioSummary, useQuotes } from "../lib/queries";
+import { usePortfolioSummary, useQuotes, useAttribution } from "../lib/queries";
 import { computeValuation } from "../lib/valuation";
 import { money, signedMoney, signedPercent, percent } from "../lib/format";
 import { StatTile } from "../components/StatTile";
 import { QueryState } from "../components/QueryState";
+import type { HoldingContribution } from "../lib/portfolioApi";
+
+function ContributionRow({ holding }: { holding: HoldingContribution }) {
+  const isPositive = holding.contribution >= 0;
+  return (
+    <div className="flex flex-col gap-1 px-4 py-2.5">
+      <div className="flex items-center justify-between text-sm">
+        <span className="flex items-center gap-2">
+          <span className="font-mono font-semibold text-ink">{holding.ticker}</span>
+          {!holding.is_open_position && (
+            <span className="rounded bg-surface-alt px-1.5 py-0.5 text-[10px] font-semibold uppercase text-ink-faint">
+              Closed
+            </span>
+          )}
+        </span>
+        <span className={`font-mono font-semibold ${isPositive ? "text-up" : "text-down"}`}>
+          {signedMoney(holding.contribution)}
+          {holding.contribution_pct != null && (
+            <span className="ml-1.5 text-xs text-ink-faint">({signedPercent(holding.contribution_pct, 1)})</span>
+          )}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-surface-alt">
+        <div
+          className={`h-full rounded-full ${isPositive ? "bg-up" : "bg-down"}`}
+          style={{ width: `${Math.min(Math.abs(holding.contribution_pct ?? 0), 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PerformanceAttributionSection() {
+  const attribution = useAttribution();
+  const data = attribution.data;
+
+  return (
+    <section className="rounded-md border border-line">
+      <div className="border-b border-line px-4 py-2.5 text-sm font-bold text-ink">
+        Performance Attribution
+      </div>
+
+      <QueryState
+        isLoading={attribution.isLoading}
+        isError={attribution.isError}
+        error={attribution.error}
+        onRetry={() => void attribution.refetch()}
+      >
+        {data?.status === "insufficient_history" ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-sm font-bold text-ink">Insufficient portfolio history</p>
+            <p className="mx-auto mt-1.5 max-w-sm text-sm text-ink-muted">
+              Performance attribution requires sufficient transaction and valuation history.{" "}
+              {data.detail}
+            </p>
+          </div>
+        ) : data?.status === "ok" ? (
+          <>
+            <div className="flex items-center justify-between border-b border-line-soft px-4 py-2.5">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                Total Portfolio Return (since inception)
+              </span>
+              <span className={`font-mono text-lg font-bold ${data.total_return! >= 0 ? "text-up" : "text-down"}`}>
+                {signedMoney(data.total_return!)}
+              </span>
+            </div>
+
+            <div className="border-b border-line-soft px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              Contribution by holding
+            </div>
+            <div className="divide-y divide-line-soft">
+              {data.holdings.map((h) => (
+                <ContributionRow key={h.ticker} holding={h} />
+              ))}
+            </div>
+
+            <div className="grid gap-4 border-t border-line-soft p-4 sm:grid-cols-2">
+              <div className="rounded-md border border-line-soft p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                  Largest Contributor
+                </div>
+                {data.largest_contributor ? (
+                  <div className="mt-1.5 flex items-baseline justify-between">
+                    <span className="font-mono font-semibold text-ink">{data.largest_contributor.ticker}</span>
+                    <span className="font-mono font-semibold text-up">
+                      {signedMoney(data.largest_contributor.contribution)}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="mt-1.5 text-sm text-ink-faint">None — no holding contributed positively.</p>
+                )}
+              </div>
+              <div className="rounded-md border border-line-soft p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                  Largest Detractor
+                </div>
+                {data.largest_detractor ? (
+                  <div className="mt-1.5 flex items-baseline justify-between">
+                    <span className="font-mono font-semibold text-ink">{data.largest_detractor.ticker}</span>
+                    <span className="font-mono font-semibold text-down">
+                      {signedMoney(data.largest_detractor.contribution)}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="mt-1.5 text-sm text-ink-faint">None — no holding detracted.</p>
+                )}
+              </div>
+            </div>
+
+            {data.region_contributions.length > 1 && (
+              <div className="border-t border-line-soft p-4">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                  Region contribution
+                </div>
+                <div className="flex flex-col gap-2">
+                  {data.region_contributions.map((r) => (
+                    <div key={r.region} className="flex items-center justify-between text-sm">
+                      <span className="text-ink-muted">{r.region}</span>
+                      <span className={`font-mono font-semibold ${r.contribution >= 0 ? "text-up" : "text-down"}`}>
+                        {signedMoney(r.contribution)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.methodology && (
+              <details className="border-t border-line-soft p-4 text-sm">
+                <summary className="cursor-pointer font-bold text-ink">Methodology &amp; limitations</summary>
+                <ul className="mt-3 flex flex-col gap-2 text-xs text-ink-muted">
+                  <li className="flex gap-2">
+                    <span className="text-ink-faint">•</span>
+                    <span>{data.methodology.description}</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-ink-faint">•</span>
+                    <span>Period: {data.methodology.period}</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-ink-faint">•</span>
+                    <span>
+                      Contribution % is only shown when the total return is at least{" "}
+                      {money(data.methodology.contribution_pct_minimum_total_return)} in magnitude —
+                      below that, a percentage would be technically defined but not meaningfully
+                      interpretable.
+                    </span>
+                  </li>
+                </ul>
+              </details>
+            )}
+          </>
+        ) : null}
+      </QueryState>
+    </section>
+  );
+}
 
 export function PortfolioPage() {
   const summary = usePortfolioSummary();
@@ -92,7 +249,14 @@ export function PortfolioPage() {
                     <tbody className="divide-y divide-line-soft font-mono">
                       {valuation.holdings.map((h) => (
                         <tr key={h.ticker}>
-                          <td className="px-4 py-2.5 font-sans font-semibold text-ink">{h.ticker}</td>
+                          <td className="px-4 py-2.5 font-sans font-semibold text-ink">
+                            <Link
+                              to={`/app/research/${encodeURIComponent(h.ticker)}`}
+                              className="hover:underline"
+                            >
+                              {h.ticker}
+                            </Link>
+                          </td>
                           <td className="px-4 py-2.5">{h.quantity.toLocaleString()}</td>
                           <td className="px-4 py-2.5">{money(h.avgPrice, 2)}</td>
                           <td className="px-4 py-2.5">{h.price !== null ? money(h.price, 2) : "—"}</td>
@@ -124,6 +288,8 @@ export function PortfolioPage() {
                 </div>
               )}
             </section>
+
+            <PerformanceAttributionSection />
           </>
         )}
       </QueryState>

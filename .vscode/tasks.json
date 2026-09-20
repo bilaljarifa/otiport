@@ -1,6 +1,7 @@
 {
   // Alternative sans débogueur : Terminal → Exécuter la tâche…
-  // "Optiport : démarrer tout" ouvre les deux serveurs en parallèle.
+  // "Optiport : démarrer tout" ouvre l'API FastAPI et le serveur de dev
+  // Vite (React) en parallèle, chacun dans son propre panneau de terminal.
   "version": "2.0.0",
   "tasks": [
     {
@@ -14,18 +15,18 @@
       "problemMatcher": []
     },
     {
-      "label": "Interface (Streamlit)",
+      "label": "Frontend (Vite dev server)",
       "type": "shell",
-      "command": "${workspaceFolder}/venv/Scripts/python.exe",
-      "args": ["-m", "streamlit", "run", "app.py", "--server.port", "8501"],
-      "options": { "cwd": "${workspaceFolder}" },
+      "command": "npm",
+      "args": ["run", "dev"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
       "isBackground": true,
       "presentation": { "group": "optiport", "panel": "dedicated" },
       "problemMatcher": []
     },
     {
       "label": "Optiport : démarrer tout",
-      "dependsOn": ["API (Uvicorn)", "Interface (Streamlit)"],
+      "dependsOn": ["API (Uvicorn)", "Frontend (Vite dev server)"],
       "dependsOrder": "parallel",
       "problemMatcher": []
     }

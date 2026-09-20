@@ -108,6 +108,53 @@ class UpdateUserRoleRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+# ---------------------------------------------------------------------------
+#  Billing
+# ---------------------------------------------------------------------------
+
+Plan = Literal["free", "pro", "premium"]
+PaidPlan = Literal["pro", "premium"]
+
+
+class CreateCheckoutSessionRequest(BaseModel):
+    plan: PaidPlan
+
+
+class CheckoutSessionResponse(BaseModel):
+    url: str
+
+
+class PortalSessionResponse(BaseModel):
+    url: str
+
+
+PaymentMode = Literal["demo", "stripe"]
+
+
+class BillingStatusResponse(BaseModel):
+    plan: Plan
+    subscription_status: Optional[str] = None
+    current_period_end: Optional[datetime] = None
+    stripe_configured: bool
+    has_billing_account: bool
+    payment_mode: PaymentMode
+
+
+class DemoCheckoutRequest(BaseModel):
+    """Simulated card details for `PAYMENT_MODE=demo` — validated and then
+    discarded by `backend/demo_payments.py`; never persisted or logged.
+    Format-checked here so a malformed request never even reaches that
+    validation (a genuinely wrong-but-well-formed value, like a card number
+    that isn't the demo one, is `demo_payments`'s job to reject, not this
+    schema's)."""
+
+    plan: PaidPlan
+    card_number: str = Field(..., min_length=8, max_length=32)
+    exp: str = Field(..., min_length=4, max_length=5)
+    cvc: str = Field(..., min_length=3, max_length=4)
+    cardholder_name: str = Field(..., min_length=1, max_length=120)
+
+
 class SystemStats(BaseModel):
     total_users: int
     active_users: int

@@ -1,30 +1,10 @@
 {
-  // Ouvrez le dossier "Optiport" dans VS Code, puis F5.
-  // Streamlit et Uvicorn se lancent comme modules : un simple "Run" sur app.py
-  // ne fonctionnerait pas, car Streamlit doit être démarré par "streamlit run".
+  // Ouvrez le dossier "Optiport" dans VS Code, puis F5 pour déboguer le
+  // backend FastAPI. Le frontend React (Vite) se lance séparément dans un
+  // terminal — voir la tâche "Frontend (Vite dev server)" ou `npm run dev`
+  // dans frontend/ (pas de débogueur Python applicable côté React).
   "version": "0.2.0",
   "configurations": [
-    {
-      "name": "Optiport — Tout (API + Interface)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "streamlit",
-      "args": ["run", "app.py", "--server.port", "8501"],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "justMyCode": false,
-      "presentation": { "hidden": true }
-    },
-    {
-      "name": "Interface (Streamlit)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "streamlit",
-      "args": ["run", "app.py", "--server.port", "8501"],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
     {
       "name": "API (FastAPI / Uvicorn)",
       "type": "debugpy",
@@ -44,14 +24,6 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": false
-    }
-  ],
-  "compounds": [
-    {
-      // La configuration à utiliser au quotidien : démarre les deux processus.
-      "name": "▶ Optiport (API + Interface)",
-      "configurations": ["API (FastAPI / Uvicorn)", "Interface (Streamlit)"],
-      "stopAll": true
     }
   ]
 }

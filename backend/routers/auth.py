@@ -3,13 +3,21 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend import crud
-from backend.config import google_client_id, google_oauth_configured, google_redirect_uri
+from backend.config import (
+    frontend_url,
+    google_client_id,
+    google_oauth_configured,
+    google_redirect_uri,
+)
 from backend.db import get_db
 from backend.deps import get_current_user
 from backend.google_oauth import GoogleOAuthError, exchange_code_for_profile
@@ -95,23 +103,62 @@ def google_config() -> dict:
     }
 
 
+def _complete_google_login(db: Session, code: str, redirect_uri: str | None) -> User:
+    """Shared by both Google entry points below — the JSON API
+    (`POST /auth/google`, a code-exchange the *caller* already has, e.g. a
+    non-browser client) and the browser redirect handler
+    (`GET /auth/google/callback`, the one this app's own Login page uses).
+    Raises `GoogleOAuthError`/`crud.EmailAlreadyRegistered`/`ValueError`
+    (disabled account) — each entry point maps these to its own appropriate
+    response shape (a JSON error vs. a redirect back to the frontend)."""
+    profile = exchange_code_for_profile(code, redirect_uri)
+    user = crud.get_or_create_google_user(db, profile)
+    if not user.is_active:
+        raise ValueError("Ce compte est désactivé.")
+    return user
+
+
 @router.post("/google", response_model=TokenResponse)
 def google_login(req: GoogleAuthRequest, db: Session = Depends(get_db)) -> TokenResponse:
     try:
-        profile = exchange_code_for_profile(req.code, req.redirect_uri)
+        user = _complete_google_login(db, req.code, req.redirect_uri)
     except GoogleOAuthError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
-
-    try:
-        user = crud.get_or_create_google_user(db, profile)
     except crud.EmailAlreadyRegistered as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
-
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Ce compte est désactivé.")
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
 
     token, _jti, _exp = create_access_token(user.id)
     return TokenResponse(access_token=token, user=UserOut.model_validate(user))
+
+
+@router.get("/google/callback")
+def google_callback(code: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
+    """Where Google's own redirect actually lands — registered as the
+    Authorized redirect URI on the Google Cloud OAuth client, so it must be
+    a real, GET-able backend route rather than something only the React app
+    serves. Never renders a raw JSON error to the browser here: this whole
+    request is a top-level navigation Google initiated, not a fetch the
+    frontend can catch, so every outcome ends in a redirect back to the
+    frontend's own callback page — success puts the Optiport JWT in the URL
+    *fragment* (`#access_token=...`), which browsers never send to any
+    server (ours included) and which never appears in server access logs,
+    unlike a query parameter would."""
+    callback_page = f"{frontend_url()}/auth/google/callback"
+
+    if error:
+        return RedirectResponse(f"{callback_page}?{urlencode({'error': error})}")
+    if not code:
+        return RedirectResponse(f"{callback_page}?{urlencode({'error': 'missing_code'})}")
+
+    try:
+        user = _complete_google_login(db, code, google_redirect_uri())
+    except (GoogleOAuthError, crud.EmailAlreadyRegistered, ValueError) as exc:
+        return RedirectResponse(f"{callback_page}?{urlencode({'error': str(exc)})}")
+
+    token, _jti, _exp = create_access_token(user.id)
+    return RedirectResponse(f"{callback_page}#access_token={token}")
 
 
 @router.get("/me", response_model=UserOut)

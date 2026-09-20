@@ -19,15 +19,26 @@ const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
  * chart-creation time, so it needs `theme` in its own effect's dependency
  * array to redraw when the user flips the switch mid-session.
  *
- * Public pages (Landing/Login/Register) intentionally never read this — they
- * pin themselves to light via the `.theme-light-forced` CSS class instead
- * (see index.css), so this preference cannot leak into the marketing site
- * via a client-side navigation that never unmounts <html>.
+ * The Landing page still pins itself to light via `.theme-light-forced` (see
+ * index.css) regardless of this preference — a marketing surface's identity
+ * shouldn't shift with a signed-out visitor's OS setting. Login/Register/the
+ * Google callback page, however, read this like any other page: they are a
+ * real part of the product, and `index.html` carries a small blocking
+ * inline script that mirrors the logic below to set `data-theme` before
+ * first paint, so there is no flash of the wrong theme on any of them.
  */
+function systemPrefersDark(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function initialTheme(): Theme {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored === "light" || stored === "dark") return stored;
+  return systemPrefersDark() ? "dark" : "light";
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(STORAGE_KEY) as Theme) || "light",
-  );
+  const [theme, setTheme] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

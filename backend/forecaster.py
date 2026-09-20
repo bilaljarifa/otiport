@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -9,6 +10,7 @@ from sklearn.preprocessing import RobustScaler, LabelEncoder
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 
+from backend.config import lstm_model_dir
 from backend.market_cache import cache_key, price_history_cache
 
 # Region mapping for ETFs
@@ -30,8 +32,24 @@ REGION_MAPPING = {
 # Default region for unknown tickers
 DEFAULT_REGION = "North America"
 
-# Default model directory
-DEFAULT_MODEL_DIR = "trained_models_LSTM_2000_epochs/trained_models_LSTM_2000_epochs"
+# Default model directory — LSTM_MODEL_DIR overrides this (see
+# backend/config.py::lstm_model_dir), otherwise repo-relative as before.
+DEFAULT_MODEL_DIR = lstm_model_dir() or "trained_models_LSTM_2000_epochs/trained_models_LSTM_2000_epochs"
+
+# Repo root (this file lives at backend/forecaster.py) — used to resolve a
+# relative model_path against the project directory rather than whatever the
+# server process's current working directory happens to be, so forecasting
+# doesn't silently fall back to "no models found" just because the app was
+# launched from a different working directory (e.g. a process manager or
+# container with a different default cwd).
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def resolve_model_dir(raw_path: Optional[str]) -> Path:
+    path = Path(raw_path or DEFAULT_MODEL_DIR)
+    if path.is_absolute():
+        return path
+    return (_PROJECT_ROOT / path).resolve()
 
 # Feature columns used by the model (must match training)
 FEATURE_COLS = ['corr_3m', 'max_dd_6m', 'momentum_1m', 'momentum_3m', 'momentum_6m', 'vol_1m', 'Region_Encoded', 'rsi_14', 'position_52w']
@@ -67,15 +85,25 @@ def load_model_with_weights(model_path: str):
             z.extractall(tmpdir)
             weights_path = Path(tmpdir) / 'model.weights.h5'
 
+            # tf_keras writes each layer's nested path (e.g. "layers/lstm/cell")
+            # as a single HDF5 group name joined with the platform's path
+            # separator (a Windows-specific quirk: os.sep is "\\" there, so the
+            # group is literally named "layers\\lstm\\cell", not real nested
+            # groups) — only the trailing "vars/<index>" is a true nested path.
+            # Building the prefix with os.sep keeps this correct on Linux/Mac
+            # too, where os.sep is "/" and this reduces to the plain path.
+            lstm_prefix = os.sep.join(['layers', 'lstm', 'cell'])
+            dense_prefix = os.sep.join(['layers', 'dense'])
+
             with h5py.File(weights_path, 'r') as f:
                 # Load LSTM weights
-                lstm_kernel = np.array(f['layers/lstm/cell/vars/0'])
-                lstm_recurrent = np.array(f['layers/lstm/cell/vars/1'])
-                lstm_bias = np.array(f['layers/lstm/cell/vars/2'])
+                lstm_kernel = np.array(f[f'{lstm_prefix}/vars/0'])
+                lstm_recurrent = np.array(f[f'{lstm_prefix}/vars/1'])
+                lstm_bias = np.array(f[f'{lstm_prefix}/vars/2'])
 
                 # Load Dense weights
-                dense_kernel = np.array(f['layers/dense/vars/0'])
-                dense_bias = np.array(f['layers/dense/vars/1'])
+                dense_kernel = np.array(f[f'{dense_prefix}/vars/0'])
+                dense_bias = np.array(f[f'{dense_prefix}/vars/1'])
 
                 # Set weights (layers[0]=LSTM, layers[1]=Dropout, layers[2]=Dense)
                 model.layers[0].set_weights([lstm_kernel, lstm_recurrent, lstm_bias])
@@ -315,10 +343,10 @@ def predict_returns(
         Dictionary with ticker predictions and metadata
     """
     # Determine model directory
-    if model_path:
-        model_dir = Path(model_path).parent if model_path.endswith('.keras') else Path(model_path)
-    else:
-        model_dir = Path(DEFAULT_MODEL_DIR)
+    raw_dir = model_path
+    if raw_dir and raw_dir.endswith('.keras'):
+        raw_dir = str(Path(raw_dir).parent)
+    model_dir = resolve_model_dir(raw_dir)
 
     # Fetch and prepare data
     if close_prices is None:
@@ -338,62 +366,51 @@ def predict_returns(
     models_available = model_dir.exists() and any(model_dir.glob("*_model.keras"))
 
     if models_available:
-        try:
-            for ticker in tickers:
-                model_file = model_dir / f"{ticker}_model.keras"
+        for ticker in tickers:
+            model_file = model_dir / f"{ticker}_model.keras"
 
-                if not model_file.exists():
-                    predictions[ticker] = {
-                        'predicted_return_22d': None,
-                        'last_actual_return_22d': 0.0,
-                        'prediction_date': str(dataset[dataset['Ticker'] == ticker]['Date'].max())[:10] if len(dataset[dataset['Ticker'] == ticker]) > 0 else 'N/A',
-                        'note': f'Model not found for {ticker}'
-                    }
-                    continue
+            if not model_file.exists():
+                predictions[ticker] = {
+                    'predicted_return_22d': None,
+                    'last_actual_return_22d': 0.0,
+                    'prediction_date': str(dataset[dataset['Ticker'] == ticker]['Date'].max())[:10] if len(dataset[dataset['Ticker'] == ticker]) > 0 else 'N/A',
+                    'note': f'Model not found for {ticker}'
+                }
+                continue
 
-                # Get scaler for this ticker
-                scaler = scalers.get(ticker)
+            # Get scaler for this ticker
+            scaler = scalers.get(ticker)
 
-                # Create sequence for prediction
-                X, info = create_sequences_for_prediction(dataset, ticker, scaler, seq_length=10)
+            # Create sequence for prediction
+            X, info = create_sequences_for_prediction(dataset, ticker, scaler, seq_length=10)
 
-                if X is None:
-                    predictions[ticker] = {
-                        'predicted_return_22d': None,
-                        'last_actual_return_22d': 0.0,
-                        'prediction_date': 'N/A',
-                        'note': f'Insufficient data for {ticker}'
-                    }
-                    continue
+            if X is None:
+                predictions[ticker] = {
+                    'predicted_return_22d': None,
+                    'last_actual_return_22d': 0.0,
+                    'prediction_date': 'N/A',
+                    'note': f'Insufficient data for {ticker}'
+                }
+                continue
 
-                # Load model using custom loader for Keras version compatibility
+            # Load + predict is isolated per ticker: one corrupt/incompatible
+            # model file must not silently wipe out predictions already
+            # computed for every other ticker in this same batch.
+            try:
                 model = load_model_with_weights(str(model_file))
                 y_pred = model.predict(X, verbose=0)
-
                 predictions[ticker] = {
                     'predicted_return_22d': float(y_pred[0][0]),
                     'last_actual_return_22d': float(info['last_return_22d']),
                     'prediction_date': str(info['date'])[:10]
                 }
-
-        except Exception as e:
-            # Fallback if models can't be loaded
-            for ticker in tickers:
-                ticker_data = dataset[dataset['Ticker'] == ticker]
-                if len(ticker_data) > 0:
-                    predictions[ticker] = {
-                        'predicted_return_22d': None,
-                        'last_actual_return_22d': float(ticker_data['return_22d'].values[-1]) if 'return_22d' in ticker_data.columns else 0.0,
-                        'prediction_date': str(ticker_data['Date'].values[-1])[:10],
-                        'note': f'Error loading model: {str(e)}'
-                    }
-                else:
-                    predictions[ticker] = {
-                        'predicted_return_22d': None,
-                        'last_actual_return_22d': 0.0,
-                        'prediction_date': 'N/A',
-                        'note': 'No data available'
-                    }
+            except Exception as e:
+                predictions[ticker] = {
+                    'predicted_return_22d': None,
+                    'last_actual_return_22d': float(info['last_return_22d']),
+                    'prediction_date': str(info['date'])[:10],
+                    'note': f'Error loading model for {ticker}: {str(e)}'
+                }
     else:
         # No models available - return historical data only
         for ticker in tickers:
@@ -414,6 +431,16 @@ def predict_returns(
                 }
 
     return predictions
+
+
+def annualize_22d_return(return_22d: float) -> float:
+    """Annualize a 22-trading-day return (~12 non-overlapping periods/year).
+
+    Shared by `get_expected_returns` below and `backend/backtester.py`'s
+    walk-forward forecasting step, so both use the exact same conversion
+    from a raw model prediction to an annualized expected-return figure.
+    """
+    return (1 + return_22d) ** 12 - 1
 
 
 def get_expected_returns(
@@ -437,14 +464,11 @@ def get_expected_returns(
         if ticker in predictions:
             pred = predictions[ticker].get('predicted_return_22d')
             if pred is not None:
-                # Annualize 22-day return (approximately 12 periods per year)
-                annualized = (1 + pred) ** 12 - 1
-                mu.append(annualized)
+                mu.append(annualize_22d_return(pred))
             else:
                 # Fallback to historical return
                 hist = predictions[ticker].get('last_actual_return_22d', 0.0)
-                annualized = (1 + hist) ** 12 - 1
-                mu.append(annualized)
+                mu.append(annualize_22d_return(hist))
         else:
             mu.append(0.0)
 
@@ -486,6 +510,19 @@ def compute_covariance_matrix(
     return cov_matrix.values, returns
 
 
+def ensure_positive_semidefinite(cov: np.ndarray) -> np.ndarray:
+    """Nudge a covariance matrix to be positive semi-definite (the
+    optimizer's SLSQP solver misbehaves on one that isn't, which a small
+    sample or a very short history can produce). Shared by
+    `get_portfolio_data` below and `backend/backtester.py`'s per-rebalance
+    covariance step — same nudge, not two copies of it."""
+    cov = np.nan_to_num(cov, nan=0.0)
+    min_eig = np.min(np.linalg.eigvalsh(cov))
+    if min_eig < 0:
+        cov = cov + (-min_eig + 1e-6) * np.eye(cov.shape[0])
+    return cov
+
+
 def get_portfolio_data(
     tickers: List[str],
     model_path: Optional[str] = None,
@@ -520,13 +557,8 @@ def get_portfolio_data(
     # Get covariance matrix
     cov, returns = compute_covariance_matrix(tickers, start_date, close_prices=close_prices)
 
-    # Handle NaN in covariance matrix
-    cov = np.nan_to_num(cov, nan=0.0)
-
-    # Ensure covariance matrix is positive semi-definite
-    min_eig = np.min(np.linalg.eigvalsh(cov))
-    if min_eig < 0:
-        cov = cov + (-min_eig + 1e-6) * np.eye(len(tickers))
+    # Handle NaN in covariance matrix and ensure it's positive semi-definite
+    cov = ensure_positive_semidefinite(cov)
 
     # Get historical statistics
     hist_returns = returns.mean() * 252  # Annualized

@@ -22,3 +22,9 @@ _DEFAULT_TTL_SECONDS = 20 * 60
 # Shared caches, one per resource kind so a clear() on one doesn't wipe another.
 raw_news_cache = TTLCache(ttl_seconds=_DEFAULT_TTL_SECONDS)
 analyzed_news_cache = TTLCache(ttl_seconds=_DEFAULT_TTL_SECONDS)
+
+# Separate from `analyzed_news_cache`: the News Impact Analytics feature
+# fetches a much wider window (30 days vs. the feed's 2) so its statistics
+# have enough sample to be meaningful — a distinct cache keeps that larger
+# fetch from overwriting (or being overwritten by) the feed's own entry.
+news_analytics_cache = TTLCache(ttl_seconds=_DEFAULT_TTL_SECONDS)

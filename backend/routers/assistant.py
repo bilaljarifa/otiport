@@ -49,14 +49,26 @@ _SYSTEM_PROMPT = """You are Optiport's portfolio assistant, embedded in a paper-
 
 Ground rules:
 - You have tools to fetch the user's REAL account (cash, positions), live market quotes, \
-recent news, return forecasts, and portfolio optimization. Call the relevant tool before \
-answering any question that needs real numbers — never guess or invent a ticker, price, \
-quantity, or figure.
-- If a tool returns an error or a value is missing, say so plainly instead of guessing.
-- This is a simulated ($ paper trading) account — never suggest real brokerage actions.
-- The forecast and optimization tools are slow and call real historical-data fetches; only \
-call them when the user is actually asking about forecasts or an optimized allocation.
-- Keep answers concise.
+recent news, return forecasts, portfolio risk, and portfolio optimization. Call the relevant \
+tool before answering any question that needs real numbers — never guess or invent a ticker, \
+price, quantity, or figure.
+- If a tool returns an error, a "status: empty" result, or a value is missing, say so plainly \
+instead of guessing or filling in a plausible-looking number.
+- This is a simulated (paper trading) account — never suggest real brokerage actions, and never \
+imply a forecast, optimization or backtest guarantees future performance.
+- You have no tool for running a new backtest from chat — if asked to backtest a strategy, say \
+that isn't available here and point the user to the Analytics > Backtesting page.
+- The forecast, risk and optimization tools are slower and call real historical-data fetches; \
+only call them when the user is actually asking about forecasts, risk, or an optimized allocation.
+- Comparing two or more tickers: call the same tool(s) once per ticker and present the results \
+side by side; never rank them or declare an overall "winner" — state the factual differences only.
+
+Formatting:
+- Reply in clean, well-structured Markdown: a short heading or bold label for each distinct \
+section, a Markdown table (GitHub-flavored, with a header row) whenever you show more than one \
+metric across more than one row or ticker, and a concise factual takeaway at the end where useful.
+- Never paste raw JSON. Never show a stack trace or an HTTP status code.
+- Keep answers concise — prefer a compact table over a long paragraph.
 """
 
 _TOOLS: list[dict[str, Any]] = [
@@ -103,6 +115,19 @@ _TOOLS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "tickers": {"type": "array", "items": {"type": "string"}, "description": "Defaults to the full covered ETF universe if omitted."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_portfolio_risk",
+            "description": "Real risk profile of the user's current holdings: volatility, Sharpe, max drawdown, VaR, beta, concentration, diversification.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "benchmark_ticker": {"type": "string", "description": "Defaults to SPY."},
                 },
             },
         },
@@ -169,6 +194,8 @@ def _dispatch(name: str, args: dict[str, Any], db: Session, user: User) -> dict[
             return tools.get_ticker_news(args["ticker"])
         if name == "get_return_forecast":
             return tools.get_return_forecast(args.get("tickers"))
+        if name == "get_portfolio_risk":
+            return tools.get_portfolio_risk(db, user, args.get("benchmark_ticker", "SPY"))
         if name == "get_portfolio_optimization":
             return tools.get_portfolio_optimization(
                 tickers=args.get("tickers"),

@@ -43,6 +43,28 @@ export function logout(): Promise<void> {
   return apiRequest<void>("/auth/logout", { method: "POST" });
 }
 
+export interface GoogleConfig {
+  enabled: boolean;
+  client_id: string | null;
+  redirect_uri: string | null;
+}
+
+/** Public, unauthenticated — the Login page calls this to decide whether to
+ * show "Continue with Google" at all, and to build the Google authorize URL
+ * from the same client_id/redirect_uri the backend will use to verify the
+ * code it gets back (so the two can never drift apart). */
+export function googleConfig(): Promise<GoogleConfig> {
+  return apiRequest<GoogleConfig>("/auth/google/config", { auth: false });
+}
+
+export function googleLogin(code: string, redirectUri: string): Promise<TokenResponse> {
+  return apiRequest<TokenResponse>("/auth/google", {
+    method: "POST",
+    body: { code, redirect_uri: redirectUri },
+    auth: false,
+  });
+}
+
 export function me(): Promise<User> {
   return apiRequest<User>("/auth/me");
 }
